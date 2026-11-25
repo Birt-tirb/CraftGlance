@@ -1,4 +1,4 @@
-"""Build the CurseForge addon archive from the repository root."""
+"""Build a standalone installable addon archive from the repository root."""
 
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -16,5 +16,7 @@ with ZipFile(output, "w", compression=ZIP_DEFLATED) as archive:
     for file in [toc, *(addon / line for line in lines if line and not line.startswith("#"))]:
         archive.write(file, f"CraftGlance/{file.name}")
     archive.write(root / "LICENSE", "CraftGlance/LICENSE")
+    archive.write(root / "README.md", "CraftGlance/README.md")
+    archive.write(root / "TESTING.md", "CraftGlance/TESTING.md")
 
 print(output)
