@@ -1,7 +1,17 @@
-# CraftGlance 0.4.1 verification
+# CraftGlance 0.4.2 verification
 
 Checked on 25 November 2026 against the installed, running WoW Forever client
 **1.60.1.71091 / interface 16001**.
+
+## Passed in the actual 0.4.2 client display
+
+| Check | Observed result |
+| --- | --- |
+| Matching profession appearance | The attached panel's frame and background matched the profession window's warm brown and gold appearance in both This Recipe and All Materials. |
+| Recipe and saved-stock retention after reload | Linen Bandage showed Craft now 4 and Known stock 13, with current Bags 4 / Bank 0 and the recorded alt's Bags 9 / Bank Not scanned. |
+| Compact frame and expansion after reload | Automatic collapse produced a clean 200-by-52 title bar with its plus button visible and clickable. Expanding restored the 400-wide full frame, complete borders and Craft now 4 / Known stock 13. All Materials then opened with the matching palette, item icons, stock tables and dividers. |
+
+The following 0.4.1 and earlier results provide the existing behavior baseline.
 
 ## Passed in the actual 0.4.1 client display
 
@@ -77,14 +87,15 @@ Both suites passed under Lua 5.1 using the Lupa runtime.
   counts, unknown inventories, bank snapshot retention, delayed bank slots and
   tabs, reload persistence, faction/realm scope, alternative reagents and
   unsupported currency requirements.
-- `tests/fixtures.lua` covers the native inset frame and top tabs, larger game
+- `tests/fixtures.lua` covers the native profession frame and top tabs, larger game
   fonts and icons, full Bags/Bank rows by owner, explicit Not scanned states,
   known-stock summaries, shortage visibility, search, collapse, native filter
   delegation and linked/NPC/loading guards. It checks the fixed profession
   attachment, expanded and compact layout reservations, restoration after
   hiding or combat, preservation of native crafting controls and mouse-wheel
   forwarding over reagent rows with top/bottom bounds. It also checks material
-  and owner separators and refresh after item information becomes available.
+  and owner separators, refresh after item information becomes available, and
+  clipping native frame art while the compact title bar is shown.
 
 Temporary API diagnostics were used during verification. The repository and
 release ZIP contain addon source, documentation and the MIT license. Player

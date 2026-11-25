@@ -1,4 +1,4 @@
-# CraftGlance 0.4.1
+# CraftGlance 0.4.2
 
 A crafting resource tracker for **World of Warcraft Forever**. Select a recipe
 in your own profession window to see how many crafts your bags support and
@@ -6,9 +6,10 @@ where your materials are stored across recorded characters and banks.
 
 ## Features
 
-- A collapsible panel with native WoW frame chrome and tabs, attached to the
-  profession window. It reserves space in the native window layout so the bank
-  opens alongside it. The recipe list, Create and Create All controls stay usable.
+- A collapsible panel with brown and gold styling matched to the profession
+  window, native WoW frame chrome and tabs. It reserves native layout space so
+  the bank opens alongside it. The recipe list, Create and Create All controls
+  stay usable.
 - **This Recipe** opens by default. Native recipe and reagent icons help you
   recognize the selected craft and its ingredients.
 - The prominent **Craft now** count shows recipe executions from bags only,
@@ -84,7 +85,7 @@ The inventory and planning regression suite covers bags-only API flags, reagent
 bags, duplicate ingredient aggregation, bank persistence and delayed scans,
 alt ownership, realm isolation, known-stock planning and unsupported reagent
 choices. Panel fixtures exercise UI state without replacing the live-client checks.
-The archive is written to `dist/CraftGlance-0.4.1.zip`.
+The archive is written to `dist/CraftGlance-0.4.2.zip`.
 
 See [TESTING.md](TESTING.md) for the release's actual in-game checks and any
 checks still awaiting player interaction.

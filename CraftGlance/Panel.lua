@@ -157,7 +157,7 @@ local function renderRows(entries)
         local row = rows[index]
         if not row then
             row = CreateFrame("Frame", nil, body)
-            row.background = background(row, 0, 0, 0, 0.22)
+            row.background = background(row, 0, 0, 0, 0)
             row.cardTop = row:CreateTexture(nil, "BORDER")
             row.cardTop:SetHeight(1)
             row.cardTop:SetPoint("TOPLEFT", 0, 0)
@@ -256,6 +256,8 @@ local function position()
     collapse:SetPoint("TOPRIGHT", -5, -3)
     collapse:SetText(collapsed and "+" or "-")
     panel.InsetBg:SetShown(not collapsed)
+    -- Keep full-size native corner art inside the compact title bar.
+    panel:SetClipsChildren(collapsed)
     reserveSpace(panel:IsVisible())
 end
 
@@ -381,11 +383,20 @@ local function attach()
     local registered = UIPanelWindows and UIPanelWindows.ProfessionsFrame
     baseExtra = (ProfessionsFrame.GetAttribute and ProfessionsFrame:GetAttribute("UIPanelLayout-extraWidth")) or
         (registered and registered.extraWidth) or 0
-    panel = CreateFrame("Frame", "CraftGlancePanel", page, "BasicFrameTemplateWithInset")
+    panel = CreateFrame("Frame", "CraftGlancePanel", page, "DefaultPanelTemplate")
     panel:SetSize(width, 560); panel:SetFrameLevel(page:GetFrameLevel() + 5)
-    panel.TitleText:SetText("CraftGlance"); panel.CloseButton:Hide()
+    panel.TitleText = panel.TitleContainer.TitleText
+    panel.TitleText:SetText("CraftGlance")
+    -- Use the same client art as the native Forever profession frame.
+    SetTextureWithAddressModeOptions(panel.Bg, "Profession-Background-Overview")
+    panel.TopTileStreaks:Hide()
+    panel.InsetBg = panel:CreateTexture(nil, "BACKGROUND", nil, -3)
+    panel.InsetBg:SetAtlas("Profession-Background-Template2")
+    panel.InsetBg:SetPoint("TOPLEFT", 3, -21)
+    panel.InsetBg:SetPoint("BOTTOMRIGHT", -3, 3)
     panel.minTabWidth, panel.maxTabWidth, panel.tabPadding = 180, 180, 0
     collapse = button(panel, "-", width - 32, -3, 26, function() collapsed = not collapsed; refresh() end)
+    collapse:SetFrameLevel(panel.TitleContainer:GetFrameLevel() + 1)
     local function tab(caption, x, callback)
         local control = CreateFrame("Button", nil, panel, "PanelTopTabButtonTemplate")
         control:SetPoint("TOPLEFT", x, -34); control:SetText(caption)
@@ -400,7 +411,7 @@ local function attach()
     recipeName = text(panel, "GameFontNormalLarge", 68, -84, "", width - 88)
     hero = CreateFrame("Frame", nil, panel)
     hero:SetSize(width - 28, 107)
-    hero.background = background(hero, 0, 0, 0, 0.2)
+    hero.background = background(hero, 0, 0, 0, 0)
     headline = text(hero, "GameFontHighlightLarge", 12, -11, "", width - 52)
     summary = text(hero, "GameFontHighlight", 12, -35, "", width - 52)
     tint(summary, colors.text)

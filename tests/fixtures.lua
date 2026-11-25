@@ -19,6 +19,7 @@ local function widget(kind, name, parent)
     function frame:SetPoint(...) self.point = {...} end
     function frame:ClearAllPoints() self.point = nil end
     function frame:SetSize(width, height) self.width, self.height = width, height end
+    function frame:SetClipsChildren(value) self.clipsChildren = value end
     function frame:SetWidth(width) self.width = width end
     function frame:SetHeight(height) self.height = height end
     function frame:GetWidth() return self.width or 1200 end
@@ -41,6 +42,7 @@ local function widget(kind, name, parent)
     function frame:SetTextColor(...) self.color = {...} end
     function frame:SetColorTexture(...) self.color = {...} end
     function frame:SetTexture(value) self.texture = value end
+    function frame:SetAtlas(value) self.atlas = value end
     function frame:GetAttribute(key) return self.attributes and self.attributes[key] end
     function frame:SetAttribute(key, value)
         self.attributes = self.attributes or {}
@@ -104,11 +106,12 @@ function CreateFrame(kind, name, parent, template)
     local frame = widget(kind, name, parent)
     frame.template = template
     if kind == "CheckButton" then frame.Text = frame:CreateFontString() end
-    if template == "BasicFrameTemplateWithInset" then
-        frame.TitleText = frame:CreateFontString()
-        frame.CloseButton = widget("Button", nil, frame)
-        frame.Inset = widget("Frame", nil, frame)
-        frame.InsetBg = frame:CreateTexture()
+    if template == "DefaultPanelTemplate" then
+        frame.TitleContainer = widget("Frame", nil, frame)
+        frame.TitleContainer.TitleText = frame.TitleContainer:CreateFontString()
+        frame.Bg = frame:CreateTexture()
+        frame.TopTileStreaks = frame:CreateTexture()
+        frame.NineSlice = widget("Frame", nil, frame)
     elseif template == "PanelTopTabButtonTemplate" then
         frame.Text = frame:CreateFontString()
     end
@@ -126,6 +129,7 @@ function GetServerTime() return 1000 end
 function InCombatLockdown() return inCombat end
 function SetUIPanelAttribute(frame, key, value) frame:SetAttribute("UIPanelLayout-" .. key, value) end
 function UpdateUIPanelPositions() positionUpdates = positionUpdates + 1 end
+function SetTextureWithAddressModeOptions(texture, value) texture:SetTexture(value) end
 function PanelTemplates_TabResize(frame, _, width) frame:SetWidth(width) end
 function PanelTemplates_SelectTab(frame) frame:SetEnabled(false) end
 function PanelTemplates_DeselectTab(frame) frame:SetEnabled(true) end
@@ -244,8 +248,9 @@ createAll:SetScript("OnClick", createHandler)
 event("TRADE_SKILL_SHOW")
 expect("Select a recipe")
 assert(not control("This Recipe").enabled and control("All Materials").enabled, "Default to This Recipe")
-assert(CraftGlancePanel.template == "BasicFrameTemplateWithInset" and not CraftGlancePanel.CloseButton:IsVisible(),
-    "Use the native inset frame and its title instead of a custom backdrop")
+assert(CraftGlancePanel.template == "DefaultPanelTemplate"
+    and CraftGlancePanel.TitleText == CraftGlancePanel.TitleContainer.TitleText,
+    "Use the native profession frame and its title container")
 assert(control("This Recipe").template == "PanelTopTabButtonTemplate", "Use native profession-style tabs")
 assert(CraftGlancePanel.point[2] == ProfessionsFrame, "Dock beside the profession window")
 assert(ProfessionsFrame:GetAttribute("UIPanelLayout-extraWidth") == 17 + 400 + 55,
@@ -376,6 +381,7 @@ assert(materialRow().icon.texture == 134400, "An uncached icon uses the game fal
 control("-"):Click()
 assert(CraftGlancePanel:GetHeight() == 52 and not search:IsVisible() and not filter:IsVisible())
 assert(not CraftGlancePanel.InsetBg:IsVisible(), "Collapse hides the native inset background")
+assert(CraftGlancePanel.clipsChildren, "Collapse clips native frame art to the compact title bar")
 assert(CraftGlancePanel:GetWidth() == 200 and ProfessionsFrame:GetAttribute("UIPanelLayout-extraWidth") == 17 + 200 + 55,
     "Collapse reserves only the compact attachment width")
 assert(not control("This Recipe"):IsVisible(), "Collapse hides contents")
@@ -383,6 +389,7 @@ control("+"):Click()
 expectOwner("You", "Not scanned", "2")
 expectOwner("Bea", "9", "Not scanned")
 assert(CraftGlancePanel.InsetBg:IsVisible())
+assert(not CraftGlancePanel.clipsChildren, "Expansion restores the normal native frame artwork bounds")
 assert(ProfessionsFrame:GetAttribute("UIPanelLayout-extraWidth") == 17 + 400 + 55)
 filter:SetChecked(true)
 filter:Click()
