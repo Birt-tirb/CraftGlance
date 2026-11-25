@@ -114,22 +114,55 @@ event("BANKFRAME_CLOSED")
 character("Player-B", "Bea", 1, 2)
 character("Player-C", "PvPAlt", 100, 100, "PvP")
 local plan = addon.BuildRecipePlan({item(2589, 4), item(2589, 3)})
-assert(plan.craftNow == 1 and plan.target == 2 and plan.ingredients[1].required == 7)
-assert(plan.ingredients[1].missingOne == 0 and plan.ingredients[1].missingNext == 7)
-assert(plan.pickups[1].count == 2, "Prioritize own bank")
-assert(#plan.transfers == 2 and plan.transfers[1].count == 1 and plan.transfers[2].count == 2)
-assert(plan.acquire[1].count == 2, "Only acquire the residual after available transfers")
-assert(plan.action:find("Withdraw 2 Linen Cloth", 1, true) and plan.action:find("Acquire 2 Linen Cloth", 1, true))
+assert(plan.craftNow == 1 and plan.ingredients[1].required == 7)
+assert(plan.ingredients[1].missingOne == 0 and plan.ingredients[1].knownTotal == 12)
+assert(plan.craftWithKnownStock == 1 and not plan.stockUnknown)
+assert(plan.target == nil and plan.action == nil and plan.pickups == nil and plan.transfers == nil and plan.acquire == nil,
+    "The stock model does not prescribe an extra craft or partial transfers")
 local list = addon.GetMaterialList("linen")
 assert(#list == 1 and list[1].total == 12, "Account bank and other rulesets cannot inflate totals")
 local choices = item(2589, 1)
 choices.reagents[2] = {itemID = 2592}
-assert(addon.BuildRecipePlan({choices}).incomplete and addon.BuildRecipePlan({choices}).craftNow == nil)
+local choicePlan = addon.BuildRecipePlan({choices})
+assert(choicePlan.incomplete and choicePlan.craftNow == nil and choicePlan.craftWithKnownStock == nil
+    and choicePlan.message and choicePlan.stockUnknown)
 C_CurrencyInfo = {GetCurrencyInfo = function() return {name = "Token", quantity = 100} end}
 local currencyPlan = addon.BuildRecipePlan({{required = true, quantityRequired = 3, reagents = {{currencyID = 10}}}})
-assert(currencyPlan.incomplete and currencyPlan.craftNow == nil, "Currency requirements do not imply an item-inventory craft count")
+assert(currencyPlan.incomplete and currencyPlan.craftNow == nil and currencyPlan.craftWithKnownStock == nil,
+    "Currency requirements do not imply an item-inventory craft count")
 local shortages = addon.ReadMaterials({item(2589, 4), item(2589, 3)}, function() return 5 end, function() return "Linen Cloth" end)
 assert(shortages[1].missing == 2, "Existing repeated-ingredient behavior stays intact")
+local originalSources = addon.GetSources
+local stockSources = {
+    {guid = player.guid, name = player.name, isCurrent = true, location = "bags", count = 4, scanned = true},
+    {guid = player.guid, name = player.name, isCurrent = true, location = "bank", count = 0, scanned = true},
+    {guid = "Player-B", name = "Bea", isCurrent = false, location = "bags", count = 9, scanned = true, updatedAt = 900},
+    {guid = "Player-B", name = "Bea", isCurrent = false, location = "bank", scanned = false},
+}
+containers[0][1].stackCount = 4
+addon.GetSources = function() return stockSources end
+plan = addon.BuildRecipePlan({item(2589, 1)})
+assert(plan.craftNow == 4 and plan.craftWithKnownStock == 13)
+assert(plan.ingredients[1].knownTotal == 13 and plan.ingredients[1].missingOne == 0)
+assert(plan.stockUnknown and plan.ingredients[1].unknown, "Unscanned alt banks remain explicitly unknown")
+assert(plan.ingredients[1].sources[3].count == 9 and stockSources[3].count == 9,
+    "The owner list retains all nine alt items rather than requesting one")
+stockSources[1].count = 400
+assert(addon.BuildRecipePlan({item(2589, 1)}).ingredients[1].knownTotal == 13,
+    "Current bag snapshots cannot double-count or override the live bag quantity")
+containers[0][1].stackCount = 2
+stockSources = {
+    {isCurrent = true, location = "bags", count = 2, scanned = true},
+    {isCurrent = true, location = "bank", count = 9, scanned = true, updatedAt = 900},
+}
+plan = addon.BuildRecipePlan({item(2589, 5)})
+assert(plan.craftNow == 0 and plan.ingredients[1].missingOne == 3)
+assert(plan.ingredients[1].knownTotal == 11 and plan.craftWithKnownStock == 2 and not plan.stockUnknown,
+    "A missing-three recipe still displays the full nine-bank stock")
+addon.GetSources = originalSources
+plan = addon.BuildRecipePlan({item(2589, 1), item(2592, 2)})
+assert(plan.craftNow == 1 and plan.craftWithKnownStock == 1, "The scarcest ingredient limits craft counts")
+containers[0][1].stackCount = 7
 loadModules()
 assert(CraftGlanceDB.characters[player.guid].bank.items[2589] == 2, "Reload does not erase a bank snapshot")
 assert(addon.GetScanSummary().characterCount == 2)

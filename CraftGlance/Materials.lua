@@ -59,36 +59,26 @@ local function identify(ingredient)
     return currency and currency.name or ("Currency #" .. ingredient.currencyID), nil
 end
 
-local function allocate(plan, ingredient, remaining, currentBank)
+local function knownStock(ingredient)
+    local total = validCount(ingredient.bags) and ingredient.bags or 0
+    local unknown = not validCount(ingredient.bags)
     for _, source in ipairs(ingredient.sources) do
-        local takeFrom = source.location == "bank" and source.isCurrent
-        if takeFrom == currentBank and (currentBank or not source.isCurrent)
-            and source.scanned and validCount(source.count) and source.count > 0 and remaining > 0 then
-            local count = math.min(remaining, source.count)
-            local action = {itemID = ingredient.itemID, currencyID = ingredient.currencyID,
-                name = ingredient.name, count = count, source = source}
-            local list = currentBank and plan.pickups or plan.transfers
-            list[#list + 1] = action
-            remaining = remaining - count
+        -- Current bags are already counted from the live bag-only query above.
+        if not (source.isCurrent and source.location == "bags") then
+            if source.scanned and validCount(source.count) then
+                total = total + source.count
+            else
+                unknown = true
+            end
         end
     end
-    return remaining
-end
-
-local function itemText(item)
-    return item.count .. " " .. item.name
-end
-
-local function observedAt(source)
-    if source.live then return "observed now" end
-    if validCount(source.updatedAt) and date then return "recorded " .. date("%d %b %H:%M", source.updatedAt) end
-    return "recorded inventory"
+    return total, unknown
 end
 
 function addon.BuildRecipePlan(slots)
     local ingredients, incomplete = ingredientsFrom(slots)
-    local plan = {ingredients = ingredients, incomplete = incomplete, pickups = {}, transfers = {}, acquire = {}}
-    local crafts = math.huge
+    local plan = {ingredients = ingredients, incomplete = incomplete, stockUnknown = incomplete}
+    local crafts, stockCrafts = math.huge, math.huge
     for _, ingredient in ipairs(ingredients) do
         ingredient.name, ingredient.bags = identify(ingredient)
         ingredient.sources = ingredient.itemID and addon.GetSources(ingredient.itemID) or {}
@@ -98,40 +88,16 @@ function addon.BuildRecipePlan(slots)
         else
             plan.incomplete = true
         end
+        ingredient.knownTotal, ingredient.unknown = knownStock(ingredient)
+        plan.stockUnknown = plan.stockUnknown or ingredient.unknown
+        stockCrafts = math.min(stockCrafts, math.floor(ingredient.knownTotal / ingredient.required))
     end
     if #ingredients == 0 then plan.incomplete = true end
-    if not plan.incomplete then plan.craftNow, plan.target = crafts, crafts + 1 end
-    for _, ingredient in ipairs(ingredients) do
-        if validCount(ingredient.bags) then
-            ingredient.missingNext = math.max(0, ingredient.required * (plan.target or 1) - ingredient.bags)
-            local remaining = allocate(plan, ingredient, ingredient.missingNext, true)
-            remaining = allocate(plan, ingredient, remaining, false)
-            if remaining > 0 then
-                plan.acquire[#plan.acquire + 1] = {itemID = ingredient.itemID, currencyID = ingredient.currencyID,
-                    name = ingredient.name, count = remaining}
-            end
-        end
-    end
     if plan.incomplete then
-        plan.action = "Check the recipe's required reagent choices and available inventory before planning a craft."
-        return plan
+        plan.stockUnknown = true
+        plan.message = "Check the recipe's required reagent choices and available inventory."
+    else
+        plan.craftNow, plan.craftWithKnownStock = crafts, stockCrafts
     end
-    local lines, unscanned = {}, false
-    for _, item in ipairs(plan.pickups) do
-        lines[#lines + 1] = "Withdraw " .. itemText(item) .. " from your bank (" .. observedAt(item.source) .. ")."
-    end
-    for _, item in ipairs(plan.transfers) do
-        local source = item.source
-        lines[#lines + 1] = "Get " .. itemText(item) .. " from " .. source.name .. "-" .. source.realm
-            .. "'s " .. source.location .. " (" .. observedAt(source) .. ")."
-    end
-    for _, item in ipairs(plan.acquire) do lines[#lines + 1] = "Acquire " .. itemText(item) .. "." end
-    for _, ingredient in ipairs(ingredients) do
-        for _, source in ipairs(ingredient.sources) do
-            if not source.scanned then unscanned = true end
-        end
-    end
-    if unscanned then lines[#lines + 1] = "Unscanned inventories may contain more materials. Visit the bank to record it." end
-    plan.action = table.concat(lines, "\n")
     return plan
 end

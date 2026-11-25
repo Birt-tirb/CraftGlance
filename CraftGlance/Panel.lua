@@ -2,15 +2,14 @@ local _, addon = ...
 local api = C_TradeSkillUI
 local events = CreateFrame("Frame")
 local panel, form, body, scroll, filter, search, headline, summary, scanText
-local collapse, recipeTab, materialsTab, hero, recipeName, recipeIcon, columns
+local collapse, recipeTab, materialsTab, hero, recipeName, recipeIcon, stockSummary, stockNote
 local view, collapsed = "recipe", false
 local queued, lastRecipe, baseExtra, reservedExtra
 local rows = {}
-local width, compactWidth, dockGap = 360, 184, 55
+local width, compactWidth, dockGap = 400, 200, 55
 local rowWidth = width - 44
-local columnX = {154, 194, 234, 274}
 local colors = {
-    text = {0.92, 0.89, 0.81}, muted = {0.68, 0.70, 0.70},
+    text = {1, 0.97, 0.90}, muted = {0.76, 0.76, 0.72},
     good = {0.48, 0.87, 0.52}, short = {1, 0.57, 0.42}, bank = {0.53, 0.77, 1},
 }
 
@@ -65,66 +64,85 @@ local function age(timestamp)
     return math.floor(seconds / 86400) .. "d ago"
 end
 
-local function sourceLines(sources)
-    local lines = {}
+-- Show full holdings rather than allocating a single item to the next craft.
+local function owners(sources)
+    local result, byKey = {}, {}
     for _, source in ipairs(sources or {}) do
-        if source.location ~= "bags" or not source.isCurrent then
-            local who = source.isCurrent and "Your bank" or
-                ((source.name or "Character") .. " - " .. source.location)
-            if source.scanned == false then
-                lines[#lines + 1] = who .. ": not scanned"
-            elseif source.count and source.count > 0 then
-                lines[#lines + 1] = ("%s: %d (%s)"):format(who, source.count, age(source.updatedAt))
-            end
+        local key = source.guid or ((source.name or "Character") .. ":" .. (source.realm or ""))
+        local owner = byKey[key]
+        if not owner then
+            owner = {name = source.isCurrent and "You" or (source.name or "Character"),
+                isCurrent = source.isCurrent, total = 0}
+            result[#result + 1], byKey[key] = owner, owner
         end
+        owner[source.location] = source
+        if source.scanned and source.count then owner.total = owner.total + source.count end
+        if not source.scanned then owner.unknown = true end
     end
-    return table.concat(lines, "\n")
+    local visible = {}
+    for _, owner in ipairs(result) do
+        if owner.isCurrent or owner.total > 0 or owner.unknown then visible[#visible + 1] = owner end
+    end
+    return visible
 end
 
-local function totals(sources)
-    local bankCount, altCount, hasAlt, altUnknown = nil, 0, false, false
-    for _, source in ipairs(sources or {}) do
-        if source.isCurrent and source.location == "bank" then
-            if source.scanned then bankCount = source.count end
-        elseif not source.isCurrent then
-            hasAlt = true
-            if source.scanned and source.count ~= nil then altCount = altCount + source.count
-            else altUnknown = true end
-        end
-    end
-    local altText = "-"
-    if hasAlt then
-        altText = altUnknown and (altCount > 0 and (altCount .. "+") or "?") or tostring(altCount)
-    end
-    return bankCount == nil and "?" or tostring(bankCount), altText
+local function countText(source)
+    -- GetSources omits scanned zero holdings on alts, but always includes unknowns.
+    if not source then return "0" end
+    if not source.scanned or source.count == nil then return "Not scanned" end
+    return tostring(source.count)
 end
 
-local function quantity(value)
-    return value == nil and "?" or tostring(value)
-end
-
-local function nextAction(plan)
-    if plan.incomplete then return plan.action end
-    local lines = {}
-    for _, item in ipairs(plan.pickups or {}) do
-        lines[#lines + 1] = ("Pick up %d %s from your bank."):format(item.count, item.name)
-    end
-    for _, item in ipairs(plan.transfers or {}) do
-        lines[#lines + 1] = ("Get %d %s from %s's %s."):format(
-            item.count, item.name, item.source.name, item.source.location)
-    end
-    for _, item in ipairs(plan.acquire or {}) do
-        lines[#lines + 1] = ("You need %d more %s."):format(item.count, item.name)
-    end
-    for _, ingredient in ipairs(plan.ingredients or {}) do
-        for _, source in ipairs(ingredient.sources or {}) do
-            if not source.scanned then
-                lines[#lines + 1] = "Unscanned bags or banks may hold more."
-                return table.concat(lines, "\n")
-            end
+local function ownerAge(owner)
+    local labels = {}
+    for _, location in ipairs({"bags", "bank"}) do
+        local source = owner[location]
+        if source and source.scanned then
+            labels[#labels + 1] = (location == "bags" and "Bags " or "Bank ") ..
+                (source.live and "live" or age(source.updatedAt))
         end
     end
-    return table.concat(lines, "\n")
+    return table.concat(labels, "  |  ")
+end
+
+local function renderOwners(row, sources, top, required)
+    local holdings = owners(sources)
+    for index, owner in ipairs(holdings) do
+        local line = row.stockRows[index]
+        if not line then
+            line = CreateFrame("Frame", nil, row)
+            line.owner = text(line, "GameFontHighlight", 10, -2, "", 151)
+            line.bags = text(line, "GameFontHighlight", 166, -2, "", 68)
+            line.bank = text(line, "GameFontHighlight", 240, -2, "", 106)
+            line.bags:SetJustifyH("CENTER"); line.bank:SetJustifyH("CENTER")
+            line.detail = text(line, "GameFontHighlightSmall", 10, -22, "", rowWidth - 20)
+            tint(line.detail, colors.muted)
+            row.stockRows[index] = line
+        end
+        line:ClearAllPoints(); line:SetPoint("TOPLEFT", 0, -top); line:SetWidth(rowWidth)
+        line.owner:SetText(owner.name)
+        line.bags:SetText(countText(owner.bags)); line.bank:SetText(countText(owner.bank))
+        tint(line.owner, colors.text)
+        tint(line.bags, owner.bags and not owner.bags.scanned and colors.muted or colors.text)
+        tint(line.bank, owner.bank and not owner.bank.scanned and colors.muted or colors.text)
+        if owner.isCurrent and required and owner.bags and owner.bags.scanned then
+            tint(line.bags, owner.bags.count >= required and colors.good or colors.short)
+        end
+        if owner.bank and owner.bank.scanned and (owner.bank.count or 0) > 0 then tint(line.bank, colors.bank) end
+        line.detail:SetText(ownerAge(owner))
+        local height = math.max(20, line.owner:GetStringHeight() + 5,
+            line.bags:GetStringHeight() + 5, line.bank:GetStringHeight() + 5)
+        line.detail:ClearAllPoints(); line.detail:SetPoint("TOPLEFT", 10, -height)
+        if line.detail:GetText() ~= "" then height = height + line.detail:GetStringHeight() + 6 end
+        line:SetHeight(height); line:Show()
+        top = top + height + 8
+    end
+    for index = #holdings + 1, #row.stockRows do row.stockRows[index]:Hide() end
+    return top
+end
+
+local function scrollMaterials(_, delta)
+    scroll:SetVerticalScroll(math.max(0, math.min(scroll:GetVerticalScrollRange(), scroll:GetVerticalScroll() - delta * 35)))
 end
 
 local function renderRows(entries)
@@ -133,75 +151,62 @@ local function renderRows(entries)
         local row = rows[index]
         if not row then
             row = CreateFrame("Frame", nil, body)
-            row.background = background(row, 1, 1, 1, 0.035)
+            row.background = background(row, 0, 0, 0, 0.22)
             row.icon = row:CreateTexture(nil, "ARTWORK")
-            row.icon:SetSize(30, 30)
-            row.icon:SetPoint("TOPLEFT", 9, -10)
+            row.icon:SetSize(36, 36); row.icon:SetPoint("TOPLEFT", 10, -12)
             row.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
-            row.title = text(row, "GameFontNormal", 48, -10, "", 102)
-            row.detail = text(row, "GameFontHighlightSmall", 10, -50, "", rowWidth - 20)
-            tint(row.detail, colors.muted)
-            row.cells = {}
-            for column, x in ipairs(columnX) do
-                local cell = text(row, "GameFontHighlight", x, -16, "", 38)
-                cell:SetJustifyH("CENTER")
-                row.cells[column] = cell
-            end
+            row.title = text(row, "GameFontNormalLarge", 56, -12, "", rowWidth - 68)
+            row.requirement = text(row, "GameFontHighlight", 56, -36, "", rowWidth - 68)
+            row.note = text(row, "GameFontHighlight", 10, 0, "", rowWidth - 20)
+            row.headers = CreateFrame("Frame", nil, row); row.headers:SetSize(rowWidth, 20)
+            text(row.headers, "GameFontNormal", 10, 0, "Character", 150)
+            local bagHeader = text(row.headers, "GameFontNormal", 166, 0, "Bags", 68)
+            local bankHeader = text(row.headers, "GameFontNormal", 240, 0, "Bank", 106)
+            bagHeader:SetJustifyH("CENTER"); bankHeader:SetJustifyH("CENTER")
+            row.detail = text(row, "GameFontHighlight", 12, -40, "", rowWidth - 24)
+            row.stockRows = {}
             row:EnableMouse(true)
+            row:EnableMouseWheel(true)
+            row:SetScript("OnMouseWheel", scrollMaterials)
             row:SetScript("OnEnter", function(self)
                 if not GameTooltip or not self.itemID then return end
-                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                GameTooltip:SetItemByID(self.itemID)
-                GameTooltip:AddLine("CraftGlance: Need is for one craft. Craft now uses bags only.", 0.8, 0.8, 0.8, true)
-                GameTooltip:AddLine("Bank and alt counts are last observed. ? means not scanned; + means more inventories need scanning.", 0.8, 0.8, 0.8, true)
-                GameTooltip:Show()
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT"); GameTooltip:SetItemByID(self.itemID); GameTooltip:Show()
             end)
             row:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
             rows[index] = row
         end
-        row:ClearAllPoints()
-        row:SetPoint("TOPLEFT", body, "TOPLEFT", 0, -top)
-        row:SetWidth(rowWidth)
-        row.itemID = entry.itemID
-        row.title:ClearAllPoints()
-        row.detail:ClearAllPoints()
-        row.title:SetText(entry.title)
+        row:ClearAllPoints(); row:SetPoint("TOPLEFT", body, "TOPLEFT", 0, -top)
+        row:SetWidth(rowWidth); row.itemID = entry.itemID
         local material = entry.kind == "material"
-        row.icon:SetShown(material)
-        for _, cell in ipairs(row.cells) do cell:SetShown(material) end
+        row.icon:SetShown(material); row.headers:SetShown(material)
+        row.requirement:SetShown(material and entry.required ~= nil)
+        row.title:ClearAllPoints(); row.title:SetPoint("TOPLEFT", material and 56 or 12, -12)
+        row.title:SetWidth(rowWidth - (material and 68 or 24)); row.title:SetText(entry.title)
+        row.detail:SetShown(not material); row.note:Hide()
+        local height
         if material then
-            row.detail:SetFontObject("GameFontHighlightSmall")
-            tint(row.detail, colors.muted)
             row.icon:SetTexture(itemIcon(entry.itemID))
-            row.title:SetPoint("TOPLEFT", 48, -10)
-            row.title:SetWidth(102)
-            row.detail:SetPoint("TOPLEFT", 10, -math.max(47, row.title:GetStringHeight() + 19))
-            row.detail:SetText(entry.detail or "")
-            local bankCount, altCount = totals(entry.sources)
-            local values = {entry.required and tostring(entry.required) or "-", quantity(entry.bags), bankCount, altCount}
-            for column, value in ipairs(values) do
-                row.cells[column]:SetText(value)
-                tint(row.cells[column], colors.text)
+            local titleBottom = math.max(33, row.title:GetStringHeight() + 18)
+            row.requirement:ClearAllPoints(); row.requirement:SetPoint("TOPLEFT", 56, -titleBottom)
+            row.requirement:SetText(entry.required and ("Per craft: " .. entry.required) or "")
+            tint(row.requirement, colors.text)
+            local headingTop = math.max(60, titleBottom + (entry.required and 29 or 8))
+            row.headers:ClearAllPoints(); row.headers:SetPoint("TOPLEFT", 0, -headingTop)
+            height = renderOwners(row, entry.sources, headingTop + 24, entry.required)
+            if entry.missingOne and entry.missingOne > 0 then
+                row.note:ClearAllPoints(); row.note:SetPoint("TOPLEFT", 10, -height)
+                row.note:SetText("Missing to craft: " .. entry.missingOne)
+                tint(row.note, colors.short); row.note:Show()
+                height = height + row.note:GetStringHeight() + 12
             end
-            if entry.bags ~= nil and entry.required then
-                tint(row.cells[2], entry.bags >= entry.required and colors.good or colors.short)
-            end
-            if bankCount ~= "?" and tonumber(bankCount) > 0 then tint(row.cells[3], colors.bank) end
-            row:SetHeight(math.max(47, row.title:GetStringHeight() + 19) +
-                ((entry.detail and entry.detail ~= "") and row.detail:GetStringHeight() + 11 or 7))
-            row.background:SetColorTexture(1, 1, 1, index % 2 == 1 and 0.045 or 0.015)
+            height = height + 5
         else
-            row.title:SetPoint("TOPLEFT", 12, -12)
-            row.title:SetWidth(rowWidth - 24)
-            row.detail:SetPoint("TOPLEFT", row.title, "BOTTOMLEFT", 0, -8)
-            row.detail:SetFontObject("GameFontHighlight")
-            row.detail:SetText(entry.detail or "")
-            tint(row.detail, colors.text)
-            row:SetHeight(row.title:GetStringHeight() + row.detail:GetStringHeight() + 34)
-            row.background:SetColorTexture(0.65, 0.48, 0.19, entry.kind == "action" and 0.14 or 0.04)
+            for _, line in ipairs(row.stockRows) do line:Hide() end
+            row.detail:ClearAllPoints(); row.detail:SetPoint("TOPLEFT", row.title, "BOTTOMLEFT", 0, -10)
+            row.detail:SetText(entry.detail or ""); tint(row.detail, colors.text)
+            height = row.title:GetStringHeight() + row.detail:GetStringHeight() + 34
         end
-        row:Show()
-        top = top + row:GetHeight() + 7
+        row:SetHeight(height); row:Show(); top = top + height + 12
     end
     for index = #entries + 1, #rows do rows[index]:Hide() end
     body:SetHeight(math.max(top, 1))
@@ -224,10 +229,11 @@ local function position()
     panel:ClearAllPoints()
     panel:SetPoint("TOPLEFT", frame, "TOPRIGHT", dockGap, -45)
     panel:SetWidth(collapsed and compactWidth or width)
-    panel:SetHeight(collapsed and 36 or math.max(500, math.min(700, frame:GetHeight() - 45)))
+    panel:SetHeight(collapsed and 52 or math.max(500, math.min(700, frame:GetHeight() - 45)))
     collapse:ClearAllPoints()
-    collapse:SetPoint("TOPRIGHT", -8, -7)
+    collapse:SetPoint("TOPRIGHT", -5, -3)
     collapse:SetText(collapsed and "+" or "-")
+    panel.InsetBg:SetShown(not collapsed)
     reserveSpace(panel:IsVisible())
 end
 
@@ -235,9 +241,9 @@ local function scanStatus()
     local state = addon.GetScanSummary()
     if not state then return "Log in to record your inventory." end
     local bank = state.bank or {}
-    local line = state.bankOpen and "Bank open - live counts" or
-        (bank.scanned and ("Bank saved " .. age(bank.updatedAt)) or "Open your bank to scan it")
-    return line .. "  |  " .. (state.characterCount or 1) .. " character(s)\nLog into alts to record their bags and banks."
+    local line = state.bankOpen and "Your bank: live" or
+        (bank.scanned and ("Your bank: " .. age(bank.updatedAt)) or "Open your bank to scan it")
+    return (state.characterCount or 1) .. " characters recorded\n" .. line
 end
 
 local function setRecipeHeader(name, icon)
@@ -250,7 +256,7 @@ end
 local function refresh()
     if not panel or not panel:IsVisible() then return end
     position()
-    for _, widget in ipairs({recipeTab, materialsTab, scroll, hero, scanText, columns}) do
+    for _, widget in ipairs({recipeTab, materialsTab, scroll, hero, scanText}) do
         widget:SetShown(not collapsed)
     end
     if collapsed then search:Hide(); filter:Hide(); recipeIcon:Hide(); recipeName:Hide(); return end
@@ -258,35 +264,34 @@ local function refresh()
         (api.IsTradeSkillGuild and api.IsTradeSkillGuild()) or
         (api.IsNPCCrafting and api.IsNPCCrafting())
     search:SetShown(view == "materials")
-    recipeTab:SetEnabled(view ~= "recipe")
-    materialsTab:SetEnabled(view ~= "materials")
+    PanelTemplates_SelectTab(view == "recipe" and recipeTab or materialsTab)
+    PanelTemplates_DeselectTab(view == "recipe" and materialsTab or recipeTab)
     scanText:SetText(scanStatus())
     local supportsFilter = type(api.GetOnlyShowMakeableRecipes) == "function"
         and type(api.SetOnlyShowMakeableRecipes) == "function"
     filter:SetShown(supportsFilter and not linked)
     if supportsFilter then filter:SetChecked(api.GetOnlyShowMakeableRecipes()) end
+    stockSummary:Hide(); stockNote:Hide()
     if view == "materials" then
         setRecipeHeader(nil)
         headline:SetText("Find your materials")
         tint(headline, colors.text)
-        summary:SetText("Search recorded bags, banks and characters.")
-        hero:ClearAllPoints(); hero:SetPoint("TOPLEFT", 14, -78)
+        summary:SetText("Full stock by character and bank")
+        hero:ClearAllPoints(); hero:SetPoint("TOPLEFT", 14, -80)
         hero:SetHeight(69)
-        columns:ClearAllPoints(); columns:SetPoint("TOPLEFT", 14, -192)
-        scroll:ClearAllPoints(); scroll:SetPoint("TOPLEFT", 14, -215); scroll:SetPoint("BOTTOMRIGHT", -30, 93)
+        scroll:ClearAllPoints(); scroll:SetPoint("TOPLEFT", 14, -196); scroll:SetPoint("BOTTOMRIGHT", -30, 85)
         local entries = {}
         for _, material in ipairs(addon.GetMaterialList(search:GetText()) or {}) do
             entries[#entries + 1] = {kind = "material", title = material.name, itemID = material.itemID,
-                bags = material.bags, sources = material.sources, detail = sourceLines(material.sources)}
+                bags = material.bags, sources = material.sources}
         end
         if #entries == 0 then entries[1] = {title = "No recorded material matches.",
             detail = "Try a name or item ID. Visit banks and log into alts to record more."} end
         renderRows(entries)
         return
     end
-    hero:ClearAllPoints(); hero:SetPoint("TOPLEFT", 14, -129); hero:SetHeight(68)
-    columns:ClearAllPoints(); columns:SetPoint("TOPLEFT", 14, -211)
-    scroll:ClearAllPoints(); scroll:SetPoint("TOPLEFT", 14, -234); scroll:SetPoint("BOTTOMRIGHT", -30, 93)
+    hero:ClearAllPoints(); hero:SetPoint("TOPLEFT", 14, -132); hero:SetHeight(107)
+    scroll:ClearAllPoints(); scroll:SetPoint("TOPLEFT", 14, -251); scroll:SetPoint("BOTTOMRIGHT", -30, 85)
     if linked then
         setRecipeHeader(nil)
         headline:SetText("Your recipes")
@@ -318,19 +323,24 @@ local function refresh()
         renderRows({})
         return
     end
-    setRecipeHeader(recipe.name, recipe.icon or recipe.iconID)
+    setRecipeHeader(recipe.name, recipe.icon or recipe.iconID or schematic.icon)
     local plan = addon.BuildRecipePlan(schematic.reagentSlotSchematics)
     headline:SetText(plan.craftNow and ("Craft now: " .. plan.craftNow) or "Check reagent choices")
     tint(headline, plan.craftNow and plan.craftNow > 0 and colors.good or colors.short)
-    summary:SetText("Materials in your bags only")
+    summary:SetText("From your bags only")
+    if plan.craftWithKnownStock then
+        stockSummary:SetText("Known stock: " .. plan.craftWithKnownStock .. " crafts"); stockSummary:Show()
+        stockNote:SetText(plan.stockUnknown and "Some banks or characters still need scanning." or
+            "Recorded bags, banks and alts; saved counts may have changed.")
+        stockNote:Show()
+    end
     local entries = {}
     for _, ingredient in ipairs(plan.ingredients) do
         entries[#entries + 1] = {kind = "material", title = ingredient.name, itemID = ingredient.itemID,
             required = ingredient.required, bags = ingredient.bags, sources = ingredient.sources,
-            detail = sourceLines(ingredient.sources)}
+            missingOne = ingredient.missingOne}
     end
-    entries[#entries + 1] = {kind = "action", title = plan.target and ("Next craft  #" .. plan.target) or "Next craft",
-        detail = nextAction(plan) or "Review the required reagents."}
+    if plan.incomplete then entries[#entries + 1] = {title = "Review this recipe", detail = plan.message} end
     if not recipe.learned then entries[#entries + 1] = {title = "Recipe not learned", detail = "Learn this recipe before crafting it."} end
     renderRows(entries)
 end
@@ -349,33 +359,37 @@ local function attach()
     local registered = UIPanelWindows and UIPanelWindows.ProfessionsFrame
     baseExtra = (ProfessionsFrame.GetAttribute and ProfessionsFrame:GetAttribute("UIPanelLayout-extraWidth")) or
         (registered and registered.extraWidth) or 0
-    panel = CreateFrame("Frame", "CraftGlancePanel", page, "BackdropTemplate")
-    panel:SetSize(width, 560)
-    panel:SetFrameLevel(page:GetFrameLevel() + 5)
-    panel:SetBackdrop({bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        edgeSize = 14, insets = {left = 3, right = 3, top = 3, bottom = 3}})
-    panel:SetBackdropColor(0.055, 0.055, 0.048, 0.99)
-    panel:SetBackdropBorderColor(0.62, 0.48, 0.24)
-    text(panel, "GameFontNormal", 14, -13, "CraftGlance", compactWidth - 50)
-    collapse = button(panel, "-", width - 38, -7, 26, function() collapsed = not collapsed; refresh() end)
-    recipeTab = button(panel, "This Recipe", 14, -42, 158, function() view = "recipe"; scroll:SetVerticalScroll(0); refresh() end)
-    materialsTab = button(panel, "All Materials", 180, -42, 166, function() view = "materials"; scroll:SetVerticalScroll(0); refresh() end)
+    panel = CreateFrame("Frame", "CraftGlancePanel", page, "BasicFrameTemplateWithInset")
+    panel:SetSize(width, 560); panel:SetFrameLevel(page:GetFrameLevel() + 5)
+    panel.TitleText:SetText("CraftGlance"); panel.CloseButton:Hide()
+    panel.minTabWidth, panel.maxTabWidth, panel.tabPadding = 180, 180, 0
+    collapse = button(panel, "-", width - 32, -3, 26, function() collapsed = not collapsed; refresh() end)
+    local function tab(caption, x, callback)
+        local control = CreateFrame("Button", nil, panel, "PanelTopTabButtonTemplate")
+        control:SetPoint("TOPLEFT", x, -34); control:SetText(caption)
+        PanelTemplates_TabResize(control, 0, 180); control:SetScript("OnClick", callback)
+        return control
+    end
+    recipeTab = tab("This Recipe", 14, function() view = "recipe"; scroll:SetVerticalScroll(0); refresh() end)
+    materialsTab = tab("All Materials", 202, function() view = "materials"; scroll:SetVerticalScroll(0); refresh() end)
     recipeIcon = panel:CreateTexture(nil, "ARTWORK")
-    recipeIcon:SetSize(36, 36); recipeIcon:SetPoint("TOPLEFT", 16, -80)
+    recipeIcon:SetSize(40, 40); recipeIcon:SetPoint("TOPLEFT", 18, -80)
     recipeIcon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
-    recipeName = text(panel, "GameFontNormalLarge", 62, -82, "", width - 80)
+    recipeName = text(panel, "GameFontNormalLarge", 68, -84, "", width - 88)
     hero = CreateFrame("Frame", nil, panel)
-    hero:SetSize(width - 28, 68)
-    hero.background = background(hero, 0.16, 0.19, 0.14, 0.6)
+    hero:SetSize(width - 28, 107)
+    hero.background = background(hero, 0, 0, 0, 0.2)
     headline = text(hero, "GameFontHighlightLarge", 12, -11, "", width - 52)
-    summary = text(hero, "GameFontHighlight", 12, -39, "", width - 52)
-    tint(summary, colors.muted)
+    summary = text(hero, "GameFontHighlight", 12, -35, "", width - 52)
+    tint(summary, colors.text)
+    stockSummary = text(hero, "GameFontNormal", 12, -61, "", width - 52)
+    stockNote = text(hero, "GameFontHighlightSmall", 12, -83, "", width - 52); tint(stockNote, colors.muted)
     hero:EnableMouse(true)
     hero:SetScript("OnEnter", function(self)
         if not GameTooltip then return end
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         GameTooltip:SetText("Craft now uses bags only")
-        GameTooltip:AddLine("Bank and alt stock help you plan pickups. Required tools, location and cooldowns still apply.", 0.9, 0.9, 0.9, true)
+        GameTooltip:AddLine("Known stock includes recorded bags and banks. Saved counts may have changed. Required tools, location and cooldowns still apply.", 0.9, 0.9, 0.9, true)
         GameTooltip:Show()
     end)
     hero:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
@@ -386,22 +400,12 @@ local function attach()
     search:SetScript("OnEnterPressed", search.ClearFocus)
     search:SetScript("OnTextChanged", function() if view == "materials" then scroll:SetVerticalScroll(0); schedule() end end)
     search:SetText(""); search:Hide()
-    columns = CreateFrame("Frame", nil, panel)
-    columns:SetSize(rowWidth, 18)
-    local materialLabel = text(columns, "GameFontHighlightSmall", 9, 0, "Material", 140)
-    tint(materialLabel, colors.muted)
-    for index, caption in ipairs({"Need", "Bags", "Bank", "Alts"}) do
-        local label = text(columns, "GameFontHighlightSmall", columnX[index], 0, caption, 38)
-        label:SetJustifyH("CENTER"); tint(label, colors.muted)
-    end
     scroll = CreateFrame("ScrollFrame", "CraftGlanceScroll", panel, "UIPanelScrollFrameTemplate")
     body = CreateFrame("Frame", nil, scroll); body:SetSize(rowWidth, 1); scroll:SetScrollChild(body)
     scroll:EnableMouseWheel(true)
-    scroll:SetScript("OnMouseWheel", function(self, delta)
-        self:SetVerticalScroll(math.max(0, math.min(self:GetVerticalScrollRange(), self:GetVerticalScroll() - delta * 35)))
-    end)
+    scroll:SetScript("OnMouseWheel", scrollMaterials)
     filter = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
-    filter:SetSize(23, 23); filter:SetPoint("BOTTOMLEFT", 10, 65)
+    filter:SetSize(23, 23); filter:SetPoint("BOTTOMLEFT", 10, 49)
     filter.Text:SetText("Craftable only"); filter:SetHitRectInsets(0, -105, 0, 0)
     filter:SetScript("OnClick", function(self) api.SetOnlyShowMakeableRecipes(self:GetChecked() == true); schedule() end)
     scanText = text(panel, "GameFontHighlightSmall", 14, 0, "", width - 28)
