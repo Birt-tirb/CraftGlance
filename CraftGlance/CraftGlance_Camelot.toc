@@ -1,0 +1,10 @@
+## Interface: 16001
+## Title: CraftGlance
+## Notes: See craftable recipes and the materials missing for one craft.
+## Author: Birt-tirb
+## Version: 0.1.0
+## IconTexture: Interface\Icons\INV_Fabric_Linen_01
+## Category-enUS: Professions
+
+Materials.lua
+Panel.lua
