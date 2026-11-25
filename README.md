@@ -1,4 +1,4 @@
-# CraftGlance
+# CraftGlance 0.3.0
 
 A crafting resource tracker for **World of Warcraft Forever**. Select a recipe
 in your own profession window to see what you can craft from your bags, what
@@ -6,16 +6,23 @@ you need for another craft, and which recorded character or bank holds it.
 
 ## Features
 
-- A collapsible panel attached beside the existing crafting window. The native
-  recipe list, Create and Create All controls remain available.
-- **This Recipe** opens by default. Each ingredient shows the amount needed per
-  craft, your bag count, the shortage for one craft and the shortage for one
-  beyond your current bag capacity.
+- A collapsible panel attached to the profession window. It reserves space in
+  the native window layout so the bank opens alongside it. The recipe list,
+  Create and Create All controls stay usable.
+- **This Recipe** opens by default. Native recipe and reagent icons help you
+  recognize the selected craft and its ingredients.
 - **Craft now** counts recipe executions from bags only, including the equipped
-  reagent bag. Bank and alt stock never increases this number. Tools, location,
-  cooldowns and learning the recipe still apply.
-- A plain-English plan prioritizes your bank, then recorded alt inventories,
-  then materials you still need to acquire.
+  reagent bag. Hover the summary for the tools, location and cooldown reminder.
+- Ingredient columns show **Need** per craft, **Bags** on the current character,
+  **Bank** in that character's saved bank, and **Alts** across other recorded
+  characters. Owner and scan-age details appear beneath each ingredient.
+  **?** means a count is unknown or an inventory needs scanning. **3+**, for
+  example, means 3 are known and more inventories remain unscanned. Hover an
+  ingredient for its item tooltip and the column guide.
+- A separate **Next craft** card shows the action for one more craft beyond
+  what your bags support. It prioritizes your bank, then recorded alt stock,
+  then materials to acquire. With 4 Linen Cloth and a one-cloth recipe,
+  **Craft now** shows 4 and **Next craft #5** asks for 1 more cloth.
 - Bags are recorded on login and inventory changes. Character banks are scanned
   only while accessible at a bank. Counts, owner names and observation times
   survive logout and UI reload. Unscanned banks are labelled clearly.
@@ -32,8 +39,9 @@ files beside it. Restart WoW after a first install, then enable CraftGlance in
 the AddOns menu. Updates can normally be loaded with `/reload`.
 
 Open First Aid or another crafting profession and click a recipe. Use **-** to
-collapse the panel and **+** to expand it. `/cg` or `/craftglance` expands it
-while the profession window is open.
+collapse the panel to its compact title bar and **+** to expand it. It stays
+attached to the profession window as the bank opens or closes. `/cg` or
+`/craftglance` expands it while the profession window is open.
 
 Visit a bank once on each character to record its contents. Log in on another
 character to record its bags; you must use the same WoW account and local
@@ -72,7 +80,7 @@ The inventory and planning regression suite covers bags-only API flags, reagent
 bags, duplicate ingredient aggregation, bank persistence and delayed scans,
 alt ownership, realm isolation, pickup priority and unsupported reagent choices.
 Panel fixtures exercise UI state without replacing the live-client checks.
-The archive is written to `dist/CraftGlance-0.2.0.zip`.
+The archive is written to `dist/CraftGlance-0.3.0.zip`.
 
 See [TESTING.md](TESTING.md) for the release's actual in-game checks and any
 checks still awaiting player interaction.
