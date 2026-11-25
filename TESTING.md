@@ -6,6 +6,8 @@ Checked on 25 November 2026 against the installed, running WoW Forever client
 The inventory and reload checks from 0.2.0 remain applicable: Inventory.lua and
 Materials.lua are unchanged. The redesigned display, attachment, collapse,
 search and Linen Cloth transfer were checked again in 0.3.0.
+Recording another character's bags and viewing those saved counts from the main
+character were also checked in the actual client.
 
 ## Passed in the actual client
 
@@ -26,15 +28,18 @@ search and Linen Cloth transfer were checked again in 0.3.0.
 | Pickup instruction | After that deposit, the plan said to withdraw 3 Light Leather from the bank and acquire 2 Simple Wood. Bank stock did not inflate Craft now. |
 | Withdrawal event | Withdrawing all 11 Light Leather restored Bags 11, cleared the bank source and removed the leather pickup instruction. The tested leather was returned to bags. |
 | All Materials | The earlier `Light Leather` search showed Bags 0 and Bank 11 after deposit, then Bags 11 after withdrawal. In the redesigned view, searching `linen` showed Linen Bandage 40 and Linen Cloth with real item icons and quantity columns. Cloth changed from Bank 4 after deposit to Bags 4 after withdrawal. |
+| Real alt bag snapshot | A second character in the same faction and inventory scope recorded 9 Linen Cloth in bags across a UI reload. Its unvisited bank remained unscanned. |
+| Cross-character recipe view | Returning to the main character showed Linen Bandage Need 1, Bags 4, Bank 0 and Alts 9+. Craft now remained 4, matching the native 4/1 display and Create All count of 4. Owner details identified the other character's 9 bagged cloth and unscanned bank. |
+| Alt pickup plan and search | Next craft #5 offered 1 Linen Cloth from the other character's bags, with no residual acquisition needed. The unscanned-inventory note remained visible. Searching `linen` in All Materials showed the same Cloth Bags 4, Bank 0, Alts 9+ and owner details. |
 | Panel layout | The panel stayed anchored to the profession window at x883 before, during and after bank use. Reserving native layout space moved the bank to the right of the panel. All bank slots, the recipe list and Create/Create All remained usable. |
 | Collapse | The minus button reduced the panel to a 184-wide title bar and the bank reflowed. Plus restored the 360-wide panel and its reserved space. |
 | Craftable only | Checking the box filtered the native Cooking list to no results with the current inventory. Clearing it restored the list. |
 
 ## Still needs an in-game check
 
-- **A second real character.** Log in on an alt with the addon enabled, visit its
-  bank, then return to the first character and confirm the named saved locations.
-  Alt ownership and persistence passed simulated regression tests only.
+- **Alt bank stock.** Visit the other character's bank, record its contents,
+  then return to the main character and verify the saved bank quantities and
+  pickup locations. This check has passed simulated regression tests.
 
 Additional purchased bank bags, other resolutions/UI scales and professions
 beyond the recipes listed above have not been tested in-game.
