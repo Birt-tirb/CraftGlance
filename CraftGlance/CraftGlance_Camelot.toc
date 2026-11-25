@@ -2,7 +2,7 @@
 ## Title: CraftGlance
 ## Notes: Native profession side panel with bags-only craft counts and material tables by character, bags and bank.
 ## Author: Birt-tirb
-## Version: 0.4.0
+## Version: 0.4.1
 ## SavedVariables: CraftGlanceDB
 ## IconTexture: Interface\Icons\INV_Fabric_Linen_01
 ## Category-enUS: Professions

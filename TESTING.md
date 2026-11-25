@@ -1,7 +1,24 @@
-# CraftGlance 0.4.0 verification
+# CraftGlance 0.4.1 verification
 
 Checked on 25 November 2026 against the installed, running WoW Forever client
 **1.60.1.71091 / interface 16001**.
+
+## Passed in the actual 0.4.1 client display
+
+| Check | Observed result |
+| --- | --- |
+| Recipe view after reload | Linen Bandage showed Craft now 4 and Known stock 13. The current character's full row showed Bags 4 / Bank 0, and the recorded alt showed Bags 9 / Bank Not scanned. |
+| Reagent-only material list | The blank All Materials view began with Light Leather 11 and Linen Cloth. Abandoned Belongings and Anvilmar Hammer were absent. |
+| Name search | Searching `linen` showed only Linen Cloth, with the same current and alt stock rows. Finished Linen Bandage was absent. |
+| Exact ID search | Searching `1251`, the Linen Bandage item ID, showed No recorded material matches. |
+| Clear search | Clearing the search restored the reagent list and its separator lines. |
+| Separators | Gold top and bottom material-card rules, the table-header rule and the thin divider between character rows were visible. |
+
+This verification used the existing inventory without moving items. Delayed
+item-metadata loading and its event-driven list refresh passed automated tests.
+The live check used already loaded item information.
+
+The following 0.4.0 results form the display and inventory baseline.
 
 ## Passed in the actual 0.4.0 client display
 
@@ -66,7 +83,8 @@ Both suites passed under Lua 5.1 using the Lupa runtime.
   delegation and linked/NPC/loading guards. It checks the fixed profession
   attachment, expanded and compact layout reservations, restoration after
   hiding or combat, preservation of native crafting controls and mouse-wheel
-  forwarding over reagent rows with top/bottom bounds.
+  forwarding over reagent rows with top/bottom bounds. It also checks material
+  and owner separators and refresh after item information becomes available.
 
 Temporary API diagnostics were used during verification. The repository and
 release ZIP contain addon source, documentation and the MIT license. Player

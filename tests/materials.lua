@@ -36,8 +36,22 @@ C_Container = {
     end,
     GetBagName = function(id) return "Container " .. id end,
 }
+local itemMetadata = {
+    [2589] = {name = "Linen Cloth", reagent = true},
+    [2592] = {name = "Wool Cloth", reagent = true},
+    [1251] = {name = "Linen Bandage", reagent = false},
+    [9001] = {name = "Linen Armor", reagent = false},
+    [9002] = {name = "Unclassified item"},
+    [9003] = {},
+}
+local loadRequests = {}
 C_Item = {
-    GetItemInfo = function(id) return ({[2589] = "Linen Cloth", [2592] = "Wool Cloth"})[id] end,
+    GetItemInfo = function(id)
+        local metadata = itemMetadata[id] or {}
+        local info = {[1] = metadata.name, [17] = metadata.reagent}
+        return unpack(info, 1, 17)
+    end,
+    RequestLoadItemDataByID = function(id) loadRequests[id] = (loadRequests[id] or 0) + 1 end,
     GetItemCount = function(id, bank, uses, reagent, account)
         flags = {bank, uses, reagent, account}
         local result = 0
@@ -58,14 +72,14 @@ C_Bank = {
     FetchPurchasedBankTabData = function() return {{ID = 6, name = "Crafting"}} end,
     FetchNumPurchasedBankTabs = function() return 1 end,
 }
-local function event(name)
-    for _, frame in ipairs(frames) do if frame.events[name] then frame.handler(frame, name, "CraftGlance") end end
+local function event(name, ...)
+    for _, frame in ipairs(frames) do if frame.events[name] then frame.handler(frame, name, ...) end end
 end
 local function loadModules()
     addon, frames = {}, {}
     assert(loadfile("CraftGlance/Inventory.lua"))("CraftGlance", addon)
     assert(loadfile("CraftGlance/Materials.lua"))("CraftGlance", addon)
-    event("ADDON_LOADED")
+    event("ADDON_LOADED", "CraftGlance")
     event("PLAYER_LOGIN")
 end
 local function item(id, count)
@@ -182,4 +196,36 @@ assert(fresh.bank.scanned and fresh.bank.items[2589] == 8,
     "Tab data supplies IDs if the dedicated ID API is missing")
 C_Bank.FetchPurchasedBankTabIDs = idAPI
 player.guid, player.name = originalGUID, originalName
+for _, entry in ipairs({{1251, 40}, {9001, 1}, {9002, 5}, {9003, 6}, {9004, 1}}) do
+    containers[0][#containers[0] + 1] = {itemID = entry[1], stackCount = entry[2]}
+end
+loadModules()
+local inventory = CraftGlanceDB.characters[player.guid].bags.items
+local beforeLinen = inventory[2589]
+list = addon.GetMaterialList("linen")
+assert(#list == 1 and list[1].itemID == 2589,
+    "A matching name cannot include finished bandages or equipment without the crafting-reagent flag")
+assert(#addon.GetMaterialList("1251") == 0 and #addon.GetMaterialList("9001") == 0,
+    "An exact item ID cannot bypass crafting-material filtering")
+assert(#addon.GetMaterialList("9002") == 0 and #addon.GetMaterialList("9003") == 0,
+    "An unknown flag or uncached item stays hidden until confirmed")
+assert(loadRequests[9002] == 1 and loadRequests[9003] == 1,
+    "Repeated searches request missing item metadata once while pending")
+itemMetadata[9002] = {name = "Linen Thread", reagent = true}
+local refreshes = 0
+addon.InventoryChanged = function() refreshes = refreshes + 1 end
+event("ITEM_DATA_LOAD_RESULT", 9002, true)
+assert(refreshes == 1 and #addon.GetMaterialList("9002") == 1,
+    "Loaded crafting metadata refreshes the list without rescanning or losing stock")
+itemMetadata[9003] = {name = "Quest Item", reagent = false}
+event("GET_ITEM_INFO_RECEIVED", 9003, true)
+assert(#addon.GetMaterialList("9003") == 0, "Loaded non-materials remain excluded")
+local apiInfo = C_Item.GetItemInfo
+C_Item.GetItemInfo = nil
+assert(#addon.GetMaterialList("9004") == 0, "An unavailable metadata API never admits untagged items")
+C_Item.GetItemInfo = apiInfo
+assert(inventory[1251] == 40 and inventory[9001] == 1 and inventory[2589] == beforeLinen,
+    "Display filtering never deletes saved inventory observations")
+assert(addon.BuildRecipePlan({item(2589, 1)}).craftNow == 7,
+    "The materials-list filter leaves selected-recipe bag counts unchanged")
 print("CraftGlance inventory persistence and recipe planning passed")

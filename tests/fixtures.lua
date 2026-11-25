@@ -8,6 +8,7 @@ local altBankKnown, altBank = false, 0
 local inCombat = false
 local positionUpdates = 0
 local lastSearch
+local materialMetadataReady = true
 local function noop() end
 
 local function widget(kind, name, parent)
@@ -163,6 +164,7 @@ function addon.GetSources()
 end
 function addon.GetMaterialList(query)
     lastSearch = query
+    if not materialMetadataReady then return {} end
     if query ~= "" and query ~= "linen" and query ~= "2589" then return {} end
     return {{name = "Linen Cloth", itemID = 2589, bags = addon.GetBagCount(), sources = addon.GetSources()}}
 end
@@ -180,9 +182,9 @@ local function flush()
         table.remove(timers, 1)()
     end
 end
-local function event(name)
+local function event(name, ...)
     for _, frame in ipairs(widgets) do
-        if frame.events[name] and frame.scripts.OnEvent then frame.scripts.OnEvent(frame, name) end
+        if frame.events[name] and frame.scripts.OnEvent then frame.scripts.OnEvent(frame, name, ...) end
     end
     flush()
 end
@@ -271,6 +273,11 @@ assert(material.title.text == "Linen Cloth" and material.icon.texture == 132911,
     "Show the native item icon and a separate material name")
 assert(material.icon:GetWidth() >= 36 and material.title.fontObject == "GameFontNormalLarge",
     "Use a readable reagent icon and the larger standard game font")
+for _, separator in ipairs({material.cardTop, material.cardBottom, material.headerDivider}) do
+    assert(separator:IsVisible() and separator:GetHeight() == 1, "Material cards have visible divider lines")
+end
+assert(not ownStock.divider:IsVisible() and expectOwner("Bea", "0", "Not scanned").divider:IsVisible(),
+    "Draw an owner divider only between character rows")
 assert(ownStock.bags.color[1] == 1, "Insufficient bag stock has the shortage color")
 expect("Bank 2m ago")
 expect("Missing to craft: 1")
@@ -331,6 +338,16 @@ expect("Find your materials")
 expectOwner("You", "2", "2")
 expectOwner("Bea", "9", "Not scanned")
 assert(not materialRow().requirement:IsVisible() or materialRow().requirement.text == "", "Material search has no recipe requirement")
+materialMetadataReady = false
+event("GET_ITEM_INFO_RECEIVED", 2589, false)
+expect("No recorded material matches.")
+assert(not material.cardTop:IsVisible() and not material.headerDivider:IsVisible(),
+    "A recycled empty-result card hides material separators")
+materialMetadataReady = true
+event("GET_ITEM_INFO_RECEIVED", 2589, true)
+expectOwner("You", "2", "2")
+expectOwner("Bea", "9", "Not scanned")
+assert(materialRow().cardTop:IsVisible(), "Loaded item metadata refreshes the open material list")
 search:SetText("absent")
 flush()
 expect("No recorded material matches.", "Linen Cloth")

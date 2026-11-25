@@ -1,6 +1,7 @@
 local _, addon = ...
 local current, bankOpen, bagsObserved = nil, false, false
 local events = CreateFrame("Frame")
+local materialInfo, itemRequests = {}, {}
 
 local function plain(value)
     return not issecretvalue or not issecretvalue(value)
@@ -221,6 +222,25 @@ function addon.GetSources(itemID)
     return rows
 end
 
+local function craftingMaterial(itemID)
+    local cached = materialInfo[itemID]
+    if cached then return cached.name, cached.reagent end
+    local getInfo = C_Item and C_Item.GetItemInfo or GetItemInfo
+    if type(getInfo) ~= "function" then return nil, false end
+    local ok, info = pcall(function() return {getInfo(itemID)} end)
+    if not ok or not plain(info[1]) or not plain(info[17]) then return nil, false end
+    if info[1] and type(info[17]) == "boolean" then
+        materialInfo[itemID] = {name = info[1], reagent = info[17]}
+        return info[1], info[17]
+    end
+    -- Unknown metadata is not a material tag. Retry after the client loads it.
+    if not itemRequests[itemID] and C_Item and type(C_Item.RequestLoadItemDataByID) == "function" then
+        itemRequests[itemID] = true
+        call(C_Item.RequestLoadItemDataByID, itemID)
+    end
+    return nil, false
+end
+
 function addon.GetMaterialList(query)
     if not current then ensureCharacter() end
     local ids, materials = {}, {}
@@ -235,8 +255,8 @@ function addon.GetMaterialList(query)
     end
     query = type(query) == "string" and query:lower() or ""
     for itemID in pairs(ids) do
-        local name = call(C_Item and C_Item.GetItemInfo or GetItemInfo, itemID) or ("Item #" .. itemID)
-        if query == "" or tostring(itemID) == query or name:lower():find(query, 1, true) then
+        local name, reagent = craftingMaterial(itemID)
+        if reagent and (query == "" or tostring(itemID) == query or name:lower():find(query, 1, true)) then
             local sources, total = addon.GetSources(itemID), 0
             for _, row in ipairs(sources) do if number(row.count) then total = total + row.count end end
             if total > 0 then
@@ -273,12 +293,18 @@ function addon.GetScanSummary()
     return summary
 end
 
-for _, event in ipairs({"ADDON_LOADED", "PLAYER_LOGIN", "BAG_UPDATE_DELAYED", "BANKFRAME_OPENED", "BANKFRAME_CLOSED", "PLAYERBANKSLOTS_CHANGED", "BANK_TABS_CHANGED"}) do
+for _, event in ipairs({"ADDON_LOADED", "PLAYER_LOGIN", "BAG_UPDATE_DELAYED", "BANKFRAME_OPENED", "BANKFRAME_CLOSED", "PLAYERBANKSLOTS_CHANGED", "BANK_TABS_CHANGED", "GET_ITEM_INFO_RECEIVED", "ITEM_DATA_LOAD_RESULT"}) do
     events:RegisterEvent(event)
 end
-events:SetScript("OnEvent", function(_, event, name)
+events:SetScript("OnEvent", function(_, event, name, success)
     if event == "ADDON_LOADED" then
         if name == "CraftGlance" then roster() end
+    elseif event == "GET_ITEM_INFO_RECEIVED" or event == "ITEM_DATA_LOAD_RESULT" then
+        if number(name) then
+            materialInfo[name] = nil
+            if success then itemRequests[name] = nil end
+            changed()
+        end
     elseif event == "PLAYER_LOGIN" then
         ensureCharacter()
         addon.ScanBags()
