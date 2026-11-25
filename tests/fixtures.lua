@@ -9,21 +9,48 @@ local inCombat = false
 local positionUpdates = 0
 local lastSearch
 local materialMetadataReady = true
+local extraOwners, secondBags = 0, 0
 local function noop() end
+local cornerNames = {"TopLeftCorner", "TopRightCorner", "BottomLeftCorner", "BottomRightCorner"}
+local atlasInfo = {}
+for _, name in ipairs(cornerNames) do
+    atlasInfo["Fixture" .. name] = {file = "FixtureBorder", width = 64,
+        height = name:find("Top", 1, true) and 64 or 32,
+        leftTexCoord = 0.125, rightTexCoord = 0.375, topTexCoord = 0.25, bottomTexCoord = 0.75}
+end
 
 local function widget(kind, name, parent)
-    local frame = {kind = kind, parent = parent, shown = true, enabled = true, scripts = {}, events = {}}
+    local frame = {kind = kind, parent = parent, shown = true, enabled = true, scripts = {}, events = {}, points = {}}
     for _, key in ipairs({"SetJustifyH", "SetJustifyV", "SetFrameLevel", "SetBackdrop",
         "SetBackdropColor", "SetBackdropBorderColor", "SetAutoFocus", "SetMaxLetters",
-        "SetHitRectInsets", "EnableMouse", "ClearFocus", "SetTexCoord", "SetAllPoints"}) do frame[key] = noop end
-    function frame:SetPoint(...) self.point = {...} end
-    function frame:ClearAllPoints() self.point = nil end
+        "SetHitRectInsets", "EnableMouse", "ClearFocus", "SetAllPoints"}) do frame[key] = noop end
+    function frame:SetPoint(...)
+        local point = {...}
+        self.point = point
+        local relative, y = self.parent, 0
+        if type(point[2]) == "table" then
+            relative = point[2]
+            y = point[5] or 0
+        elseif type(point[2]) == "number" then
+            y = point[3] or 0
+        end
+        self.points[point[1]] = {relative = relative, y = y}
+    end
+    function frame:ClearAllPoints() self.point, self.points = nil, {} end
     function frame:SetSize(width, height) self.width, self.height = width, height end
     function frame:SetClipsChildren(value) self.clipsChildren = value end
     function frame:SetWidth(width) self.width = width end
     function frame:SetHeight(height) self.height = height end
     function frame:GetWidth() return self.width or 1200 end
-    function frame:GetHeight() return self.height or 700 end
+    function frame:GetHeight()
+        if self.height then return self.height end
+        local top = self.points.TOPLEFT or self.points.TOPRIGHT or self.points.TOP
+        local bottom = self.points.BOTTOMLEFT or self.points.BOTTOMRIGHT or self.points.BOTTOM
+        if top and bottom and top.relative == bottom.relative and top.relative then
+            return math.max(0, top.relative:GetHeight() + top.y - bottom.y)
+        end
+        return 700
+    end
     function frame:GetLeft() return 100 end
     function frame:GetRight() return 1000 end
     function frame:GetEffectiveScale() return 1 end
@@ -36,6 +63,9 @@ local function widget(kind, name, parent)
     end
     function frame:GetText() return self.text or "" end
     function frame:GetStringHeight() return 12 end
+    function frame:SetMaxLines(value) self.maxLines = value end
+    function frame:SetWordWrap(value) self.wordWrap = value end
+    function frame:SetNonSpaceWrap(value) self.nonSpaceWrap = value end
     function frame:SetFontObject(value) self.fontObject = value end
     function frame:SetFont(...) self.font = {...}; return true end
     function frame:GetFont() return unpack(self.font or {"Fonts\\FRIZQT__.TTF", 14, ""}) end
@@ -43,6 +73,8 @@ local function widget(kind, name, parent)
     function frame:SetColorTexture(...) self.color = {...} end
     function frame:SetTexture(value) self.texture = value end
     function frame:SetAtlas(value) self.atlas = value end
+    function frame:GetAtlas() return self.atlas end
+    function frame:SetTexCoord(...) self.texCoord = {...} end
     function frame:GetAttribute(key) return self.attributes and self.attributes[key] end
     function frame:SetAttribute(key, value)
         self.attributes = self.attributes or {}
@@ -78,9 +110,12 @@ local function widget(kind, name, parent)
     function frame:SetChecked(value) self.checked = value end
     function frame:GetChecked() return self.checked end
     function frame:SetScrollChild(child) self.scrollChild = child end
-    function frame:SetVerticalScroll(value) self.scroll = value end
+    function frame:SetVerticalScroll(value) self.scroll = math.max(0, math.min(value, self:GetVerticalScrollRange())) end
     function frame:GetVerticalScroll() return self.scroll or 0 end
-    function frame:GetVerticalScrollRange() return 200 end
+    function frame:GetVerticalScrollRange()
+        return self.scrollChild and math.max(0, self.scrollChild:GetHeight() - self:GetHeight()) or 0
+    end
+    function frame:UpdateScrollChildRect() end
     function frame:EnableMouseWheel(value) self.mouseWheel = value end
     function frame:Wheel(delta)
         assert(self:IsVisible() and self.mouseWheel and self.scripts.OnMouseWheel,
@@ -112,8 +147,11 @@ function CreateFrame(kind, name, parent, template)
         frame.Bg = frame:CreateTexture()
         frame.TopTileStreaks = frame:CreateTexture()
         frame.NineSlice = widget("Frame", nil, frame)
+        for _, name in ipairs(cornerNames) do frame.NineSlice[name] = frame.NineSlice:CreateTexture() end
     elseif template == "PanelTopTabButtonTemplate" then
         frame.Text = frame:CreateFontString()
+    elseif template == "UIPanelScrollFrameTemplate" then
+        frame.ScrollBar = widget("Slider", nil, frame)
     end
     return frame
 end
@@ -130,14 +168,39 @@ function InCombatLockdown() return inCombat end
 function SetUIPanelAttribute(frame, key, value) frame:SetAttribute("UIPanelLayout-" .. key, value) end
 function UpdateUIPanelPositions() positionUpdates = positionUpdates + 1 end
 function SetTextureWithAddressModeOptions(texture, value) texture:SetTexture(value) end
+C_Texture = {GetAtlasInfo = function(atlas) return assert(atlasInfo[atlas], "Unknown fixture atlas") end}
+NineSliceUtil = {}
+function NineSliceUtil.ApplyLayoutByName(frame, name)
+    assert(name == "ButtonFrameTemplateNoPortrait", "Use the native profession border layout")
+    for _, key in ipairs(cornerNames) do
+        local piece, atlas = frame[key], "Fixture" .. key
+        local info = C_Texture.GetAtlasInfo(atlas)
+        piece:SetAtlas(atlas); piece:SetTexture(info.file); piece:SetSize(info.width, info.height)
+        piece:SetTexCoord(info.leftTexCoord, info.rightTexCoord, info.topTexCoord, info.bottomTexCoord)
+        piece:ClearAllPoints()
+        local upper = key:find("Top", 1, true)
+        piece:SetPoint(key:upper():gsub("CORNER", ""), frame, key:upper():gsub("CORNER", ""),
+            key:find("Left", 1, true) and -8 or 8, upper and 16 or -8)
+    end
+end
 function PanelTemplates_TabResize(frame, _, width) frame:SetWidth(width) end
 function PanelTemplates_SelectTab(frame) frame:SetEnabled(false) end
 function PanelTemplates_DeselectTab(frame) frame:SetEnabled(true) end
+function ScrollFrame_OnScrollRangeChanged(frame, _, verticalRange)
+    frame.ScrollBar:SetShown(not frame.scrollBarHideable or verticalRange > 0)
+end
+GameTooltip = {lines = {}, shown = false}
+function GameTooltip:SetOwner(owner) self.owner = owner end
+function GameTooltip:SetText(value) self.lines = {value} end
+function GameTooltip:AddLine(value) self.lines[#self.lines + 1] = value end
+function GameTooltip:SetItemByID(itemID) self.itemID = itemID; self.lines = {"Item " .. itemID} end
+function GameTooltip:Show() self.shown = true end
+function GameTooltip:Hide() self.shown = false end
 SlashCmdList = {}
 C_Timer = {After = function(_, callback) timers[#timers + 1] = callback end}
 Enum = {CraftingReagentType = {Basic = 0, Optional = 1}}
 C_Item = {
-    GetItemInfo = function() return "Linen Cloth" end,
+    GetItemInfo = function(itemID) return itemID == 2592 and "Wool Cloth" or "Linen Cloth" end,
     GetItemIconByID = function() if iconAvailable then return 132911 end end,
 }
 C_TradeSkillUI = {
@@ -147,17 +210,26 @@ C_TradeSkillUI = {
     IsNPCCrafting = function() return npc end,
     GetRecipeSchematic = function(id)
         schematicReads = schematicReads + 1
+        if id == 9999 then
+            return {reagentSlotSchematics = {
+                {reagentType = 0, required = true, quantityRequired = 1, reagents = {{itemID = 2589}}},
+                {reagentType = 0, required = true, quantityRequired = 1, reagents = {{itemID = 2592}}},
+            }}
+        end
         return {reagentSlotSchematics = {{reagentType = 0, required = true,
             quantityRequired = id == 3275 and 1 or 2, reagents = {{itemID = 2589}}}}}
     end,
     GetOnlyShowMakeableRecipes = function() return filtered end,
     SetOnlyShowMakeableRecipes = function(value) filtered, filterChanges = value, filterChanges + 1 end,
 }
-function addon.GetBagCount() if unknown then return nil end; return bags end
-function addon.GetSources()
-    return {
+function addon.GetBagCount(itemID)
+    if unknown then return nil end
+    return itemID == 2592 and secondBags or bags
+end
+function addon.GetSources(itemID)
+    local sources = {
         {guid = "Player-A", name = "Ari", realm = "Normal", isCurrent = true, location = "bags",
-            count = addon.GetBagCount(), scanned = not unknown, live = true, updatedAt = 1000},
+            count = addon.GetBagCount(itemID), scanned = not unknown, live = true, updatedAt = 1000},
         {guid = "Player-A", name = "Ari", realm = "Normal", isCurrent = true, location = "bank",
             count = bankKnown and bank or nil, scanned = bankKnown, updatedAt = 880},
         {guid = "Player-B", name = "Bea", realm = "Normal", isCurrent = false, location = "bags",
@@ -165,6 +237,11 @@ function addon.GetSources()
         {guid = "Player-B", name = "Bea", realm = "Normal", isCurrent = false, location = "bank",
             count = altBankKnown and altBank or nil, scanned = altBankKnown, updatedAt = 760},
     }
+    for index = 1, extraOwners do
+        sources[#sources + 1] = {guid = "Player-Extra" .. index, name = "Alt" .. index,
+            realm = "Normal", isCurrent = false, location = "bags", count = 1, scanned = true, updatedAt = 700}
+    end
+    return sources
 end
 function addon.GetMaterialList(query)
     lastSearch = query
@@ -173,7 +250,7 @@ function addon.GetMaterialList(query)
     return {{name = "Linen Cloth", itemID = 2589, bags = addon.GetBagCount(), sources = addon.GetSources()}}
 end
 function addon.GetScanSummary()
-    return {bankOpen = bankOpen, characterCount = 2, bank = {scanned = bankKnown, updatedAt = 880}}
+    return {bankOpen = bankOpen, characterCount = 2 + extraOwners, bank = {scanned = bankKnown, updatedAt = 880}}
 end
 assert(loadfile("CraftGlance/Materials.lua"))("CraftGlance", addon)
 assert(loadfile("CraftGlance/Panel.lua"))("CraftGlance", addon)
@@ -210,14 +287,15 @@ local function control(caption)
     end
     error("No button " .. caption)
 end
-local function materialRow()
+local function materialRow(itemID)
+    itemID = itemID or 2589
     for _, frame in ipairs(widgets) do
-        if frame:IsVisible() and frame.itemID == 2589 and frame.stockRows then return frame end
+        if frame:IsVisible() and frame.itemID == itemID and frame.stockRows then return frame end
     end
-    error("No visible Linen Cloth row")
+    error("No visible material row for " .. itemID)
 end
-local function expectOwner(name, bagCount, bankCount)
-    local row = materialRow()
+local function expectOwner(name, bagCount, bankCount, itemID)
+    local row = materialRow(itemID)
     for _, owner in ipairs(row.stockRows) do
         if owner:IsVisible() and owner.owner.text == name then
             assert(owner.bags.text == bagCount, name .. " bag stock: " .. tostring(owner.bags.text))
@@ -226,6 +304,22 @@ local function expectOwner(name, bagCount, bankCount)
         end
     end
     error("Missing owner " .. name)
+end
+local function expectTooltip(owner, ...)
+    owner.scripts.OnEnter(owner)
+    local contents = table.concat(GameTooltip.lines, "\n")
+    assert(GameTooltip.shown and GameTooltip.owner == owner, "Hover shows source details")
+    for _, value in ipairs({...}) do
+        assert(contents:find(value, 1, true), "Missing tooltip detail: " .. value .. "\n" .. contents)
+    end
+    owner.scripts.OnLeave(owner)
+    assert(not GameTooltip.shown, "Leaving the row hides source details")
+end
+local function expectFits()
+    assert(CraftGlanceScroll:GetVerticalScrollRange() == 0, "Short material lists fit without scrolling")
+    assert(not CraftGlanceScroll.ScrollBar:IsVisible(), "Hide the scrollbar when all materials fit")
+    assert(CraftGlancePanel:GetHeight() < ProfessionsFrame:GetHeight() - 45,
+        "Short material lists shrink the attachment below the full profession height")
 end
 
 event("ADDON_LOADED")
@@ -269,36 +363,38 @@ flush()
 expect("Craft now: 0")
 expect("From your bags only")
 expect("Known stock: 4 crafts")
-expect("Some banks or characters still need scanning.")
+expect("Banks / alts need scanning")
 local material = materialRow()
-assert(material.requirement.text == "Per craft: 1")
+assert(material.requirement.text == "1")
 local ownStock = expectOwner("You", "0", "4")
 expectOwner("Bea", "0", "Not scanned")
 assert(material.title.text == "Linen Cloth" and material.icon.texture == 132911,
     "Show the native item icon and a separate material name")
-assert(material.icon:GetWidth() >= 36 and material.title.fontObject == "GameFontNormalLarge",
-    "Use a readable reagent icon and the larger standard game font")
-for _, separator in ipairs({material.cardTop, material.cardBottom, material.headerDivider}) do
+assert(material.icon:GetWidth() == 20 and material.title.fontObject == "GameFontNormal"
+    and not material.title.wordWrap and not material.title.nonSpaceWrap,
+    "Use a compact reagent icon with a single-line material name")
+assert(ownStock.point[2] == 180 and ownStock.point[3] + ownStock.owner.point[3] == material.title.point[3],
+    "The first character and material name share the same horizontal line")
+for _, separator in ipairs({material.cardTop, material.cardBottom}) do
     assert(separator:IsVisible() and separator:GetHeight() == 1, "Material cards have visible divider lines")
 end
+local tableHeader
+for _, frame in ipairs(widgets) do
+    if frame.kind == "FontString" and frame.text == "Material" then tableHeader = frame.parent end
+end
+assert(tableHeader and tableHeader:IsVisible() and tableHeader.divider:IsVisible()
+    and not material.headers and not material.headerDivider,
+    "Use one sticky table header instead of repeated headers in each material")
 assert(not ownStock.divider:IsVisible() and expectOwner("Bea", "0", "Not scanned").divider:IsVisible(),
     "Draw an owner divider only between character rows")
 assert(ownStock.bags.color[1] == 1, "Insufficient bag stock has the shortage color")
-expect("Bank 2m ago")
-expect("Missing to craft: 1")
+expectTooltip(ownStock, "You - Ari", "Bags: 0 (live)", "Bank: 4 (2m ago)")
+expect("Missing: 1", "Bank: 4 (2m ago)")
 assert(filterChanges == 0, "Reading recipes must preserve the native filter")
+expectFits()
 CraftGlanceScroll:SetVerticalScroll(0)
 material:Wheel(-1)
-assert(CraftGlanceScroll:GetVerticalScroll() > 0, "Wheeling over a reagent moves the material list down")
-local wheelPosition = CraftGlanceScroll:GetVerticalScroll()
-material:Wheel(1)
-assert(CraftGlanceScroll:GetVerticalScroll() < wheelPosition, "Wheeling upward moves the same list back up")
-CraftGlanceScroll:SetVerticalScroll(190)
-material:Wheel(-1)
-assert(CraftGlanceScroll:GetVerticalScroll() == 200, "Reagent wheel scrolling stops at the bottom")
-CraftGlanceScroll:SetVerticalScroll(0)
-material:Wheel(1)
-assert(CraftGlanceScroll:GetVerticalScroll() == 0, "Reagent wheel scrolling stops at the top")
+assert(CraftGlanceScroll:GetVerticalScroll() == 0, "Wheeling a list that fits does not move it")
 
 bags, bank, bankOpen = 2, 2, true
 addon.InventoryChanged()
@@ -314,7 +410,7 @@ flush()
 expectOwner("You", "2", "2")
 expectOwner("Bea", "9", "Not scanned")
 expect("Known stock: 13 crafts")
-expect("Bags 3m ago")
+expectTooltip(expectOwner("Bea", "9", "Not scanned"), "Bea", "Bags: 9 (3m ago)", "Bank: Not scanned")
 altBankKnown, altBank = true, 7
 addon.InventoryChanged()
 flush()
@@ -327,6 +423,49 @@ flush()
 expectOwner("You", "2", "Not scanned")
 expectOwner("Bea", "9", "Not scanned")
 expect("Open your bank to scan it")
+
+form:Init({recipeID = 9999, name = "Two-material recipe", learned = true})
+flush()
+expect("Craft now: 0")
+expect("Wool Cloth")
+expect("Missing: 1")
+local second = materialRow(2592)
+assert(second.requirement.text == "1" and second.note:IsVisible(), "Each ingredient keeps its own need and shortage")
+assert(second:GetHeight() == materialRow():GetHeight(), "A shortage fits in the spare material column without a taller two-owner row")
+expectOwner("You", "0", "Not scanned", 2592)
+expectOwner("Bea", "9", "Not scanned", 2592)
+expectFits()
+
+extraOwners = 24
+addon.InventoryChanged()
+flush()
+assert(CraftGlancePanel:GetHeight() == ProfessionsFrame:GetHeight() - 45,
+    "Cap a long stock list at the profession window height")
+local overflow = CraftGlanceScroll:GetVerticalScrollRange()
+assert(overflow > 0 and CraftGlanceScroll.ScrollBar:IsVisible(), "Real overflow enables the native scrollbar")
+assert(tableHeader.parent == CraftGlancePanel and tableHeader:IsVisible(), "The shared headings stay outside the scrolling rows")
+materialRow():Wheel(-1)
+local wheelPosition = CraftGlanceScroll:GetVerticalScroll()
+assert(wheelPosition > 0, "Wheeling over a reagent moves an overflowing list down")
+expectOwner("You", "2", "Not scanned"):Wheel(1)
+assert(CraftGlanceScroll:GetVerticalScroll() < wheelPosition, "Wheeling over a character moves the same list up")
+CraftGlanceScroll:SetVerticalScroll(overflow - 1)
+materialRow():Wheel(-1)
+assert(CraftGlanceScroll:GetVerticalScroll() == overflow, "Wheel scrolling stops at the actual list bottom")
+CraftGlanceScroll:SetVerticalScroll(0)
+materialRow():Wheel(1)
+assert(CraftGlanceScroll:GetVerticalScroll() == 0, "Wheel scrolling stops at the list top")
+
+CraftGlanceScroll:SetVerticalScroll(overflow)
+extraOwners = 0
+addon.InventoryChanged()
+flush()
+expectFits()
+assert(CraftGlanceScroll:GetVerticalScroll() == 0, "A refreshed short list clamps a previous scroll offset")
+form:Init({recipeID = 3275, name = "Linen Bandage", learned = true})
+flush()
+expect("Craft now: 2")
+expectFits()
 bankKnown = true
 addon.InventoryChanged()
 flush()
@@ -343,10 +482,23 @@ expect("Find your materials")
 expectOwner("You", "2", "2")
 expectOwner("Bea", "9", "Not scanned")
 assert(not materialRow().requirement:IsVisible() or materialRow().requirement.text == "", "Material search has no recipe requirement")
+expectFits()
+extraOwners = 24
+addon.InventoryChanged()
+flush()
+assert(CraftGlanceScroll:GetVerticalScrollRange() > 0 and CraftGlanceScroll.ScrollBar:IsVisible(),
+    "All Materials also scrolls only when its recorded owners overflow")
+materialRow():Wheel(-1)
+assert(CraftGlanceScroll:GetVerticalScroll() > 0, "Mouse wheel works in an overflowing material search")
+extraOwners = 0
+addon.InventoryChanged()
+flush()
+expectFits()
+assert(CraftGlanceScroll:GetVerticalScroll() == 0, "Shorter search results restore the unscrolled compact list")
 materialMetadataReady = false
 event("GET_ITEM_INFO_RECEIVED", 2589, false)
 expect("No recorded material matches.")
-assert(not material.cardTop:IsVisible() and not material.headerDivider:IsVisible(),
+assert(not material.cardTop:IsVisible() and not tableHeader:IsVisible(),
     "A recycled empty-result card hides material separators")
 materialMetadataReady = true
 event("GET_ITEM_INFO_RECEIVED", 2589, true)
@@ -361,7 +513,7 @@ form:Init({recipeID = 3276, name = "Heavy Linen Bandage", learned = true})
 flush()
 expect("Heavy Linen Bandage")
 expect("Craft now: 1", "No recorded material matches.")
-assert(nativeSelections == 2 and not control("This Recipe").enabled, "Preserve selection and restore recipe view")
+assert(nativeSelections == 4 and not control("This Recipe").enabled, "Preserve selection and restore recipe view")
 unknown = true
 addon.InventoryChanged()
 flush()
@@ -381,7 +533,20 @@ assert(materialRow().icon.texture == 134400, "An uncached icon uses the game fal
 control("-"):Click()
 assert(CraftGlancePanel:GetHeight() == 52 and not search:IsVisible() and not filter:IsVisible())
 assert(not CraftGlancePanel.InsetBg:IsVisible(), "Collapse hides the native inset background")
-assert(CraftGlancePanel.clipsChildren, "Collapse clips native frame art to the compact title bar")
+for _, key in ipairs(cornerNames) do
+    local piece, info = CraftGlancePanel.NineSlice[key], C_Texture.GetAtlasInfo("Fixture" .. key)
+    local upper = key:find("Top", 1, true)
+    local keep = upper and 40 or 20
+    local span = (info.bottomTexCoord - info.topTexCoord) * keep / info.height
+    assert(piece:GetWidth() == info.width and piece:GetHeight() == keep,
+        "Shorten only the inner tail of a collapsed native corner")
+    assert(piece.texCoord[1] == info.leftTexCoord and piece.texCoord[2] == info.rightTexCoord
+        and piece.texCoord[3] == (upper and info.topTexCoord or info.bottomTexCoord - span)
+        and piece.texCoord[4] == (upper and info.topTexCoord + span or info.bottomTexCoord),
+        "Keep upper corners' top pixels and lower corners' bottom pixels")
+    assert(piece.point[4] == (key:find("Left", 1, true) and -8 or 8)
+        and piece.point[5] == (upper and 16 or -8), "Retain the native outer border anchors")
+end
 assert(CraftGlancePanel:GetWidth() == 200 and ProfessionsFrame:GetAttribute("UIPanelLayout-extraWidth") == 17 + 200 + 55,
     "Collapse reserves only the compact attachment width")
 assert(not control("This Recipe"):IsVisible(), "Collapse hides contents")
@@ -389,7 +554,13 @@ control("+"):Click()
 expectOwner("You", "Not scanned", "2")
 expectOwner("Bea", "9", "Not scanned")
 assert(CraftGlancePanel.InsetBg:IsVisible())
-assert(not CraftGlancePanel.clipsChildren, "Expansion restores the normal native frame artwork bounds")
+for _, key in ipairs(cornerNames) do
+    local piece, info = CraftGlancePanel.NineSlice[key], C_Texture.GetAtlasInfo("Fixture" .. key)
+    assert(piece:GetAtlas() == "Fixture" .. key and piece:GetWidth() == info.width and piece:GetHeight() == info.height
+        and piece.texCoord[1] == info.leftTexCoord and piece.texCoord[2] == info.rightTexCoord
+        and piece.texCoord[3] == info.topTexCoord and piece.texCoord[4] == info.bottomTexCoord,
+        "Expansion restores the native corner atlas, dimensions and full texture")
+end
 assert(ProfessionsFrame:GetAttribute("UIPanelLayout-extraWidth") == 17 + 400 + 55)
 filter:SetChecked(true)
 filter:Click()

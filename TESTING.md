@@ -1,7 +1,22 @@
-# CraftGlance 0.4.2 verification
+# CraftGlance 0.5.0 verification
 
 Checked on 25 November 2026 against the installed, running WoW Forever client
 **1.60.1.71091 / interface 16001**.
+
+## Passed in the actual 0.5.0 client display
+
+| Check | Observed result |
+| --- | --- |
+| Compact two-ingredient recipe | Herb Baked Egg showed both ingredients on one page without a scrollbar. Small Egg showed Need 1, You Bags 2 / Bank 0 and the recorded alt Bags 0 / Bank Not scanned. Mild Spices showed Need 1, You Bags 0 / Bank 0 and the recorded alt Bags 0 / Bank Not scanned, with Missing 1 beneath the material. |
+| Recipe counts | Craft now 0 and Known stock 0 matched the native Small Egg 2/1 and Mild Spices 0/1 quantities. |
+| Height for short lists | The panel shortened to fit the compact recipe list while both ingredients and their owners remained visible. |
+| Character hover | Hovering You displayed Bags 2 live and Bank 0 with an observation age of approximately 53 minutes. The recorded alt's bank remained Not scanned. |
+| Long reagent list | Clearing All Materials search displayed Light Leather, Linen Cloth, Malachite, Peacebloom, Ruined Leather Scraps and Sharp Claw. The panel grew to its bounded height and displayed an overflow scrollbar. Wheeling over an owner row revealed lower material rows. |
+| Search after overflow | Searching `linen` after scrolling restored the complete Linen Cloth entry, with You Bags 4 / Bank 0 and the recorded alt Bags 9 / Bank Not scanned. The window shortened again and the scrollbar disappeared. |
+| Final reload and header | After the final UI reload, the full Need header was readable without an ellipsis. Herb Baked Egg still showed both materials and every owner row without a scrollbar, with Small Egg Bags 2, Mild Spices Bags 0, Craft now 0 and Known stock 0. |
+| Collapse and expansion | After reload, the 52-high collapsed title bar retained its full gold top border and all four native corners, with the artwork fitting the title bar. Expansion restored the full native frame, compact content-fitting height and complete table. Minimizing again preserved the complete border. The native crafting controls remained visible and unobstructed. |
+
+The following 0.4.2 and earlier results provide the existing behavior baseline.
 
 ## Passed in the actual 0.4.2 client display
 
@@ -87,15 +102,17 @@ Both suites passed under Lua 5.1 using the Lupa runtime.
   counts, unknown inventories, bank snapshot retention, delayed bank slots and
   tabs, reload persistence, faction/realm scope, alternative reagents and
   unsupported currency requirements.
-- `tests/fixtures.lua` covers the native profession frame and top tabs, larger game
-  fonts and icons, full Bags/Bank rows by owner, explicit Not scanned states,
-  known-stock summaries, shortage visibility, search, collapse, native filter
-  delegation and linked/NPC/loading guards. It checks the fixed profession
-  attachment, expanded and compact layout reservations, restoration after
-  hiding or combat, preservation of native crafting controls and mouse-wheel
-  forwarding over reagent rows with top/bottom bounds. It also checks material
-  and owner separators, refresh after item information becomes available, and
-  clipping native frame art while the compact title bar is shown.
+- `tests/fixtures.lua` covers the shared Material/Need/Character/Bags/Bank
+  header, compact owner rows, full holdings, unknown inventories, hover names
+  and observation ages, known-stock summaries, shortage visibility and search.
+  Short and empty lists fit the dynamic panel height. Long lists and many alts
+  retain bounded height, conditional scrollbar ranges and mouse-wheel bounds.
+  It also checks native frame art and tabs, fixed profession attachment,
+  expanded and collapsed layout reservations, restoration after hiding or
+  combat, native crafting controls and filter delegation, linked/NPC/loading
+  guards, material and owner separators, refresh after item information loads,
+  and corner texture coordinates that preserve the native outer artwork while
+  collapsed and restore the full corner atlases when expanded.
 
 Temporary API diagnostics were used during verification. The repository and
 release ZIP contain addon source, documentation and the MIT license. Player
