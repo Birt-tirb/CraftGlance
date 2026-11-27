@@ -5,6 +5,7 @@ local filtered, filterChanges, schematicReads = false, 0, 0
 local bags, bank, unknown, bankOpen = 0, 4, false, false
 local bankKnown, altBags, iconAvailable = true, 0, true
 local altBankKnown, altBank = false, 0
+local bankStale, altBankStale = false, false
 local inCombat = false
 local positionUpdates = 0
 local lastSearch
@@ -231,11 +232,11 @@ function addon.GetSources(itemID)
         {guid = "Player-A", name = "Ari", realm = "Normal", isCurrent = true, location = "bags",
             count = addon.GetBagCount(itemID), scanned = not unknown, live = true, updatedAt = 1000},
         {guid = "Player-A", name = "Ari", realm = "Normal", isCurrent = true, location = "bank",
-            count = bankKnown and bank or nil, scanned = bankKnown, updatedAt = 880},
+            count = bankKnown and bank or nil, scanned = bankKnown, stale = bankStale, updatedAt = 880},
         {guid = "Player-B", name = "Bea", realm = "Normal", isCurrent = false, location = "bags",
             count = altBags, scanned = true, updatedAt = 820},
         {guid = "Player-B", name = "Bea", realm = "Normal", isCurrent = false, location = "bank",
-            count = altBankKnown and altBank or nil, scanned = altBankKnown, updatedAt = 760},
+            count = altBankKnown and altBank or nil, scanned = altBankKnown, stale = altBankStale, updatedAt = 760},
     }
     for index = 1, extraOwners do
         sources[#sources + 1] = {guid = "Player-Extra" .. index, name = "Alt" .. index,
@@ -250,7 +251,8 @@ function addon.GetMaterialList(query)
     return {{name = "Linen Cloth", itemID = 2589, bags = addon.GetBagCount(), sources = addon.GetSources()}}
 end
 function addon.GetScanSummary()
-    return {bankOpen = bankOpen, characterCount = 2 + extraOwners, bank = {scanned = bankKnown, updatedAt = 880}}
+    return {bankOpen = bankOpen, characterCount = 2 + extraOwners,
+        bank = {scanned = bankKnown, stale = bankStale, updatedAt = 880}}
 end
 assert(loadfile("CraftGlance/Materials.lua"))("CraftGlance", addon)
 assert(loadfile("CraftGlance/Panel.lua"))("CraftGlance", addon)
@@ -416,6 +418,33 @@ addon.InventoryChanged()
 flush()
 expectOwner("Bea", "9", "7")
 expect("Known stock: 20 crafts")
+bankStale = true
+addon.InventoryChanged()
+flush()
+expect("Known stock: 18 crafts")
+expect("Banks / alts need scanning")
+expect("Your bank: rescan needed", "Your bank: live")
+local staleStock = expectOwner("You", "2", "2*")
+expectTooltip(staleStock, "Bank: 2 (last observed 2m ago; rescan needed)")
+assert(staleStock.bank.color[1] == 0.76, "Last-observed bank stock uses the muted color")
+bankStale, altBankStale = false, true
+addon.InventoryChanged()
+flush()
+expect("Known stock: 13 crafts")
+expectOwner("Bea", "9", "7*")
+expectTooltip(expectOwner("Bea", "9", "7*"), "Bank: 7 (last observed 4m ago; rescan needed)")
+altBankStale, altBags, altBank = false, 0, 0
+addon.InventoryChanged()
+flush()
+expectOwner("Bea", "0", "0")
+expect("Known stock: 4 crafts")
+expect("Recorded bags, banks and alts", "Banks / alts need scanning")
+bankKnown = false
+addon.InventoryChanged()
+flush()
+expectOwner("Bea", "0", "0")
+expect("Banks / alts need scanning")
+altBags = 9
 altBankKnown, altBank = false, 0
 bankKnown, bankOpen = false, false
 addon.InventoryChanged()
@@ -602,6 +631,94 @@ assert(ProfessionsFrame:GetAttribute("UIPanelLayout-extraWidth") == 17,
 page:Show()
 flush()
 assert(not control("This Recipe").enabled and control("All Materials").enabled)
+
+-- A malformed recipe/inventory refresh must not escape, spin, or leave stale rows.
+local buildPlan, getSchematic = addon.BuildRecipePlan, C_TradeSkillUI.GetRecipeSchematic
+local getMaterials, getSummary = addon.GetMaterialList, addon.GetScanSummary
+local originalPrint, loggedErrors = print, {}
+print = function(message) loggedErrors[#loggedErrors + 1] = tostring(message) end
+local function expectFallback()
+    expect("Recipe loading", "Craft now:")
+    expect("Unable to read materials. Select a recipe to try again.")
+    assert(CraftGlancePanel:IsVisible() and control("-"):IsVisible(), "The failed panel remains collapsible")
+    assert(not CraftGlanceScroll:IsVisible() and not tableHeader:IsVisible(), "Fallback hides previous material data")
+    assert(#timers == 0, "A failed refresh never schedules its own retry")
+end
+addon.BuildRecipePlan = function() error("fixture bad recipe") end
+addon.RefreshPanel(); addon.RefreshPanel(); addon.RefreshPanel()
+assert(#timers == 1, "Error handling preserves refresh debouncing")
+flush()
+expectFallback()
+addon.RefreshPanel(); flush()
+expectFallback()
+assert(#loggedErrors == 1 and loggedErrors[1]:find("fixture bad recipe", 1, true), "Log a refresh error once")
+control("-"):Click()
+assert(CraftGlancePanel:GetHeight() == 52 and control("+"):IsVisible(), "Collapse still works after a failed recipe")
+control("+"):Click()
+expectFallback()
+addon.BuildRecipePlan = buildPlan
+addon.RefreshPanel(); flush()
+expect("Craft now: 1")
+expectOwner("You", "2", "2")
+
+C_TradeSkillUI.GetRecipeSchematic = function() return true end
+addon.RefreshPanel(); flush()
+expectFallback()
+C_TradeSkillUI.GetRecipeSchematic = getSchematic
+addon.BuildRecipePlan = function() return {ingredients = false} end
+addon.RefreshPanel(); flush()
+expectFallback()
+addon.BuildRecipePlan = buildPlan
+addon.RefreshPanel(); flush()
+expect("Craft now: 1")
+
+addon.GetMaterialList = function() error("fixture bad material list") end
+control("All Materials"):Click()
+expectFallback()
+addon.GetMaterialList = getMaterials
+addon.RefreshPanel(); flush()
+expect("Find your materials")
+expectOwner("You", "2", "2")
+altBags, altBankKnown, altBank = 0, true, 0
+addon.RefreshPanel(); flush()
+expectOwner("Bea", "0", "0")
+altBags, altBankKnown = 9, false
+control("This Recipe"):Click()
+addon.GetScanSummary = function() error("fixture bad scan summary") end
+addon.RefreshPanel(); flush()
+expectFallback()
+addon.GetScanSummary = getSummary
+addon.RefreshPanel(); flush()
+expect("Craft now: 1")
+assert(#loggedErrors == 1, "Different malformed data cannot flood the chat log")
+
+page:Hide()
+addon.BuildRecipePlan = function() error("hidden panels must not read recipes") end
+local readsBeforeHidden = schematicReads
+addon.RefreshPanel(); flush()
+assert(schematicReads == readsBeforeHidden and #loggedErrors == 1, "Hidden panels return before reading APIs")
+addon.BuildRecipePlan = buildPlan
+page:Show(); flush()
+print = originalPrint
+expect("Craft now: 1")
+local currencyInfo = C_CurrencyInfo
+C_CurrencyInfo = {GetCurrencyInfo = function() return {name = "Token", quantity = 100} end}
+C_TradeSkillUI.GetRecipeSchematic = function(id)
+    if id == 10000 then
+        return {reagentSlotSchematics = {{required = true, quantityRequired = 3, reagents = {{currencyID = 10}}}}}
+    end
+    return getSchematic(id)
+end
+form:Init({recipeID = 10000, name = "Currency recipe", learned = true})
+flush()
+expect("Craft now: 33")
+expect("Known stock: 33 crafts")
+expect("Bags and owned currency", "From your bags only")
+C_CurrencyInfo, C_TradeSkillUI.GetRecipeSchematic = currencyInfo, getSchematic
+form:Init({recipeID = 3276, name = "Heavy Linen Bandage", learned = true})
+flush()
+expect("Craft now: 1")
+expect("From your bags only")
 assert(create.scripts.OnClick == createHandler and createAll.scripts.OnClick == createHandler,
     "Native Create and Create All keep their handlers")
 print("CraftGlance panel selection, inventory, search and native controls passed")

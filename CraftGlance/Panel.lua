@@ -6,6 +6,7 @@ local collapse, recipeTab, materialsTab, hero, recipeName, recipeIcon, stockSumm
 local tableHeader, needHeader
 local view, collapsed = "recipe", false
 local queued, lastRecipe, baseExtra, reservedExtra
+local refreshErrorLogged = false
 local rows = {}
 local width, compactWidth, dockGap = 400, 200, 55
 local rowWidth = width - 44
@@ -82,25 +83,17 @@ local function owners(sources)
         if not owner then
             owner = {name = source.isCurrent and "You" or (source.name or "Character"),
                 fullName = source.name or "Character",
-                isCurrent = source.isCurrent, total = 0}
+                isCurrent = source.isCurrent}
             result[#result + 1], byKey[key] = owner, owner
         end
         owner[source.location] = source
-        if source.scanned and source.count then owner.total = owner.total + source.count end
-        if not source.scanned then owner.unknown = true end
     end
-    local visible = {}
-    for _, owner in ipairs(result) do
-        if owner.isCurrent or owner.total > 0 or owner.unknown then visible[#visible + 1] = owner end
-    end
-    return visible
+    return result
 end
 
 local function countText(source)
-    -- GetSources omits scanned zero holdings on alts, but always includes unknowns.
-    if not source then return "0" end
-    if not source.scanned or source.count == nil then return "Not scanned" end
-    return tostring(source.count)
+    if not source or not source.scanned or source.count == nil then return "Not scanned" end
+    return tostring(source.count) .. (source.stale and "*" or "")
 end
 
 local function scrollMaterials(_, delta)
@@ -108,6 +101,9 @@ local function scrollMaterials(_, delta)
 end
 
 local function sourceDetail(label, source)
+    if source and source.scanned and source.stale then
+        return label .. ": " .. tostring(source.count) .. " (last observed " .. age(source.updatedAt) .. "; rescan needed)"
+    end
     return label .. ": " .. countText(source) ..
         (source and source.scanned and (" (" .. (source.live and "live" or age(source.updatedAt)) .. ")") or "")
 end
@@ -148,12 +144,12 @@ local function renderOwners(row, sources, required)
         line.owner:SetText(owner.name)
         line.bags:SetText(countText(owner.bags)); line.bank:SetText(countText(owner.bank))
         tint(line.owner, colors.text)
-        tint(line.bags, owner.bags and not owner.bags.scanned and colors.muted or colors.text)
-        tint(line.bank, owner.bank and not owner.bank.scanned and colors.muted or colors.text)
+        tint(line.bags, owner.bags and (not owner.bags.scanned or owner.bags.stale) and colors.muted or colors.text)
+        tint(line.bank, owner.bank and (not owner.bank.scanned or owner.bank.stale) and colors.muted or colors.text)
         if owner.isCurrent and required and owner.bags and owner.bags.scanned then
             tint(line.bags, owner.bags.count >= required and colors.good or colors.short)
         end
-        if owner.bank and owner.bank.scanned and (owner.bank.count or 0) > 0 then tint(line.bank, colors.bank) end
+        if owner.bank and owner.bank.scanned and not owner.bank.stale and (owner.bank.count or 0) > 0 then tint(line.bank, colors.bank) end
         line:Show()
     end
     for index = #holdings + 1, #row.stockRows do row.stockRows[index]:Hide() end
@@ -299,8 +295,14 @@ local function scanStatus()
     local state = addon.GetScanSummary()
     if not state then return "Log in to record your inventory." end
     local bank = state.bank or {}
-    local line = state.bankOpen and "Your bank: live" or
-        (bank.scanned and ("Your bank: " .. age(bank.updatedAt)) or "Open your bank to scan it")
+    local line
+    if bank.stale then
+        line = "Your bank: rescan needed"
+    elseif bank.scanned then
+        line = state.bankOpen and "Your bank: live" or ("Your bank: " .. age(bank.updatedAt))
+    else
+        line = "Open your bank to scan it"
+    end
     return (state.characterCount or 1) .. " characters  |  " .. line
 end
 
@@ -311,8 +313,7 @@ local function setRecipeHeader(name, icon)
     recipeName:SetShown(name ~= nil)
 end
 
-local function refresh()
-    if not panel or not panel:IsVisible() then return end
+local function refreshContents()
     position()
     for _, widget in ipairs({recipeTab, materialsTab, scroll, hero, scanText, tableHeader}) do
         widget:SetShown(not collapsed)
@@ -392,15 +393,46 @@ local function refresh()
         stockNote:SetText(plan.stockUnknown and "Banks / alts need scanning" or "Recorded bags, banks and alts")
         stockNote:Show()
     end
-    local entries = {}
+    local entries, hasCurrency = {}, false
     for _, ingredient in ipairs(plan.ingredients) do
+        hasCurrency = hasCurrency or ingredient.currencyID ~= nil
         entries[#entries + 1] = {kind = "material", title = ingredient.name, itemID = ingredient.itemID,
             required = ingredient.required, bags = ingredient.bags, sources = ingredient.sources,
             missingOne = ingredient.missingOne}
     end
+    if hasCurrency then summary:SetText("Bags and owned currency") end
     if plan.incomplete then entries[#entries + 1] = {title = "Review this recipe", detail = plan.message} end
     if not recipe.learned then entries[#entries + 1] = {title = "Recipe not learned", detail = "Learn this recipe before crafting it."} end
     renderRows(entries)
+end
+
+local function refreshFallback()
+    -- Avoid inventory/recipe APIs and row rendering while handling their failure.
+    for _, row in ipairs(rows) do row:Hide() end
+    body:SetHeight(1)
+    for _, widget in ipairs({search, filter, scroll, tableHeader, recipeIcon, recipeName, stockSummary, stockNote}) do
+        widget:Hide()
+    end
+    recipeTab:SetShown(not collapsed); materialsTab:SetShown(not collapsed)
+    hero:SetShown(not collapsed); scanText:SetShown(not collapsed)
+    if collapsed then return end
+    panel:SetHeight(280)
+    hero:ClearAllPoints(); hero:SetPoint("TOPLEFT", 14, -112); hero:SetHeight(44)
+    headline:SetText("Recipe loading"); tint(headline, colors.text)
+    summary:SetText("Unable to read materials. Select a recipe to try again."); summary:Show()
+    scanText:SetText("Inventory details unavailable.")
+end
+
+local function refresh()
+    if not panel or not panel:IsVisible() then return end
+    local ok, err = pcall(refreshContents)
+    if not ok then
+        refreshFallback()
+        if not refreshErrorLogged then
+            refreshErrorLogged = true
+            print("CraftGlance: material refresh failed; select a recipe to retry. " .. tostring(err))
+        end
+    end
 end
 
 local function schedule()
@@ -456,8 +488,8 @@ local function attach()
     hero:SetScript("OnEnter", function(self)
         if not GameTooltip then return end
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText("Craft now uses bags only")
-        GameTooltip:AddLine("Known stock includes recorded bags and banks. Saved counts may have changed. Required tools, location and cooldowns still apply.", 0.9, 0.9, 0.9, true)
+        GameTooltip:SetText("Craft now uses bags and owned currency")
+        GameTooltip:AddLine("Known stock includes recorded bags and banks. Counts marked * are last observed after a failed scan and excluded from Known stock until rescanned. Required tools, location and cooldowns still apply.", 0.9, 0.9, 0.9, true)
         GameTooltip:Show()
     end)
     hero:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
@@ -484,7 +516,7 @@ local function attach()
     tableHeader:SetScript("OnEnter", function(self)
         if not GameTooltip then return end
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT"); GameTooltip:SetText("Material stock")
-        GameTooltip:AddLine("Need is the quantity for one craft. Bags and Bank show each character's full holding. Not scanned means that inventory is unknown. Hover a character for scan times.", 0.9, 0.9, 0.9, true)
+        GameTooltip:AddLine("Need is the quantity for one craft. Bags and Bank show each character's full holding, including scanned zeros. Not scanned means that inventory is unknown. * means last observed after a failed scan; excluded from Known stock. Hover a character for scan times.", 0.9, 0.9, 0.9, true)
         GameTooltip:Show()
     end)
     tableHeader:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)

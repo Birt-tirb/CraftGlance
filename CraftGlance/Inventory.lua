@@ -26,6 +26,9 @@ local function snapshot(value)
     if type(value.items) ~= "table" then value.items = {} end
     if type(value.containers) ~= "table" then value.containers = {} end
     value.scanned = value.scanned == true
+    -- Older snapshots recorded failed scans in state without clearing scanned.
+    value.stale = value.stale == true or
+        (value.scanned and value.state ~= nil and value.state ~= "scanned")
     if not number(value.updatedAt) then value.updatedAt = nil end
     return value
 end
@@ -33,8 +36,46 @@ end
 local function roster()
     if type(CraftGlanceDB) ~= "table" then CraftGlanceDB = {} end
     if type(CraftGlanceDB.characters) ~= "table" then CraftGlanceDB.characters = {} end
-    CraftGlanceDB.inventoryVersion = 1
+    CraftGlanceDB.inventoryVersion = 2
     return CraftGlanceDB.characters
+end
+
+local function identityNumber(value)
+    if number(value) and value > 0 and value == math.floor(value) then return value end
+end
+
+local function realmName(value)
+    if not plain(value) or type(value) ~= "string" then return nil end
+    local normalized = value:lower():gsub("%s+", "")
+    if normalized ~= "" then return normalized end
+end
+
+local function scopeKey(region, realm)
+    local normalized = realmName(realm)
+    if identityNumber(region) and normalized then return "realm-v2:" .. region .. ":" .. normalized end
+end
+
+local function migrateScope(character)
+    local key, normalized = character.ruleset, realmName(character.realm)
+    if type(key) ~= "string" or not normalized then return end
+    local region, identity = key:match("^realm%-v2:(%d+):(.+)$")
+    local canonical = region ~= nil
+    if not region then region, identity = key:match("^(%d+):(.+)$") end
+    region = identityNumber(tonumber(region))
+    if not region or (character.region ~= nil and character.region ~= region) then return end
+    local storedID = identityNumber(character.realmID)
+    if character.realmID ~= nil and not storedID then return end
+    local legacyID = not canonical and identityNumber(tonumber(identity)) or nil
+    if canonical then
+        if identity ~= normalized then return end
+    elseif legacyID then
+        if tostring(legacyID) ~= identity or (storedID and storedID ~= legacyID) then return end
+    elseif realmName(identity) ~= normalized then
+        return
+    end
+    character.region = region
+    character.realmID = storedID or legacyID
+    character.ruleset = scopeKey(region, character.realm)
 end
 
 local function ensureCharacter()
@@ -42,14 +83,23 @@ local function ensureCharacter()
     local name, realm = call(UnitName, "player"), call(GetRealmName)
     if type(guid) ~= "string" or type(name) ~= "string" or type(realm) ~= "string" then return nil end
     local characters = roster()
+    for _, recorded in pairs(characters) do
+        if type(recorded) == "table" then migrateScope(recorded) end
+    end
     local character = characters[guid]
     if type(character) ~= "table" then character = {} end
+    local sameRealm = realmName(character.realm) == realmName(realm)
+    local region = identityNumber(call(GetCurrentRegion))
+    local realmID = identityNumber(call(GetRealmID))
+    -- A missing API result must not erase identity learned for this same GUID.
+    if not region and sameRealm then region = identityNumber(character.region) end
+    if not realmID and sameRealm and character.region == region then realmID = identityNumber(character.realmID) end
     character.guid, character.name, character.realm = guid, name, realm
     character.faction = call(UnitFactionGroup, "player") or "Unknown"
-    character.realmID = call(GetRealmID)
-    character.region = call(GetCurrentRegion)
-    -- Realm identity is a conservative boundary until Forever exposes a ruleset API.
-    character.ruleset = tostring(character.region or "") .. ":" .. tostring(character.realmID or realm)
+    character.realmID, character.region = realmID, region
+    -- Realm names are stable when GetRealmID is temporarily unavailable. Unknown
+    -- regions get a GUID-local scope rather than pooling unverified characters.
+    character.ruleset = scopeKey(region, realm) or ("unverified:" .. guid)
     character.bags, character.bank = snapshot(character.bags), snapshot(character.bank)
     character.lastSeen = now()
     characters[guid], current = character, character
@@ -74,7 +124,7 @@ local function readContainers(ids, names, bank)
     if not C_Container or not C_Container.GetContainerNumSlots or not C_Container.GetContainerItemInfo then
         return nil, "unavailable"
     end
-    local result = {scanned = true, updatedAt = now(), state = "scanned", items = {}, containers = {}}
+    local result = {scanned = true, stale = false, updatedAt = now(), state = "scanned", items = {}, containers = {}}
     for _, bagID in ipairs(ids) do
         local slots = call(C_Container.GetContainerNumSlots, bagID)
         if not number(slots) or slots ~= math.floor(slots) or (bank and slots == 0) then return nil, "unavailable" end
@@ -157,7 +207,12 @@ function addon.ScanBank()
     else
         reason = type(names) == "string" and names or "unavailable"
     end
-    if observed then character.bank = observed else character.bank.state = reason or "unavailable" end
+    if observed then
+        character.bank = observed
+    else
+        character.bank.state = reason or "unavailable"
+        character.bank.stale = true
+    end
     changed()
     return observed ~= nil
 end
@@ -183,7 +238,12 @@ function addon.GetBagCount(itemID)
 end
 
 local function compatible(character)
-    return current and character.faction == current.faction and character.ruleset == current.ruleset
+    if not current then return false end
+    migrateScope(character)
+    local realmID, currentID = identityNumber(character.realmID), identityNumber(current.realmID)
+    return character.faction == current.faction and character.ruleset == current.ruleset and
+        realmName(character.realm) == realmName(current.realm) and
+        character.region == current.region and not (realmID and currentID and realmID ~= currentID)
 end
 
 local function source(character, location, itemID)
@@ -193,11 +253,14 @@ local function source(character, location, itemID)
     if not number(count) then count = nil end
     if isCurrent and location == "bags" then count = addon.GetBagCount(itemID) end
     local live = isCurrent and (location == "bags" and count ~= nil or location == "bank" and bankOpen and stored.state == "scanned")
+    local stale = location == "bank" and stored.stale
+    if stale then live = false end
     return {
         guid = character.guid, name = character.name, realm = character.realm,
         faction = character.faction, ruleset = character.ruleset, location = location,
         count = count, updatedAt = stored.updatedAt, isCurrent = not not isCurrent,
-        scanned = count ~= nil and (stored.scanned or live), state = stored.state or "unscanned", live = not not live,
+        scanned = count ~= nil and (stored.scanned or live), stale = not not stale,
+        state = stored.state or "unscanned", live = not not live,
     }
 end
 
@@ -208,8 +271,7 @@ function addon.GetSources(itemID)
     for _, character in pairs(roster()) do
         if type(character) == "table" and compatible(character) then
             for _, location in ipairs({"bags", "bank"}) do
-                local row = source(character, location, itemID)
-                if row.isCurrent or not row.scanned or (number(row.count) and row.count > 0) then rows[#rows + 1] = row end
+                rows[#rows + 1] = source(character, location, itemID)
             end
         end
     end
@@ -284,7 +346,7 @@ function addon.GetScanSummary()
             }
             summary.characters[#summary.characters + 1] = row
             summary.characterCount = summary.characterCount + 1
-            if not row.bank.scanned then summary.unscannedBanks = summary.unscannedBanks + 1 end
+            if not row.bank.scanned or row.bank.stale then summary.unscannedBanks = summary.unscannedBanks + 1 end
             if row.isCurrent then summary.bags, summary.bank = row.bags, row.bank end
         end
     end

@@ -1,7 +1,30 @@
-# CraftGlance 0.5.0 verification
+# CraftGlance 0.5.1 review candidate verification
 
-Checked on 25 November 2026 against the installed, running WoW Forever client
-**1.60.1.71091 / interface 16001**.
+Prepared on 27 November 2026 on branch `craftglance-0.5.1`, based on the 0.5.0
+release at `08d2e58`. This candidate is for branch review. No new 0.5.1 in-game
+automation or live-client verification was performed for this change.
+
+## 0.5.1 verification status
+
+The candidate adds owned-currency counts, safe panel-refresh fallback and
+recovery, visible scanned-zero alt holdings, stale-bank exclusion from stock
+planning while retaining its last observation for display, and stable realm-key
+migration. Automated results for these changes are recorded below.
+The remaining live checks require player interaction.
+
+## User-reported 0.5.0 alt-bank evidence
+
+The user supplied two screenshots confirming a nonzero bank quantity on a
+second character and its saved display after returning to the main character.
+The reported main-character view showed current Bags 4, Birt Bags 8 / Bank 1,
+Tirb Bags 1 / Bank Not scanned, and Known stock 14. This establishes a 0.5.0
+alt-bank baseline from the user's screenshots. Retesting with 0.5.1 remains
+pending.
+
+## Historical 0.5.0 verification
+
+The following checks were performed on 25 November 2026 against the installed,
+running WoW Forever client **1.60.1.71091 / interface 16001**.
 
 ## Passed in the actual 0.5.0 client display
 
@@ -86,14 +109,47 @@ display changes.
 
 ## Still needs an in-game check
 
-- Alt bank stock. Visit the other character's bank, record its contents, then
-  return to the main character and verify its saved bank quantities. This
-  behavior has passed simulated regression tests.
+- Purchased character-bank tabs. Open a bank with additional purchased tabs,
+  confirm every tab's contents appear, record the tab/container IDs, then
+  reload and confirm the saved quantities survive.
+- Realm identity across logins. Note the roster and saved bags/bank, log out
+  and back in, and repeat across a later session. Confirm that the same
+  character retains its observations and appears once after key migration.
+- 0.5.1 alt-bank retest. Record a nonzero quantity in an alt's bank, return to
+  the main character and verify the saved owner and quantity. User-provided
+  screenshots establish this behavior for 0.5.0 as described above.
 
 Additional purchased bank bags, other resolutions/UI scales and professions
 beyond the recipes listed above have not been tested in-game.
 
-## Automated checks
+## 0.5.1 automated checks
+
+Both `tests/materials.lua` and `tests/fixtures.lua` passed on 27 November 2026
+using `lupa.lua51.LuaRuntime`. The runtime's `_VERSION` reported `Lua 5.1`.
+A standalone `lua5.1` executable was unavailable in the review environment.
+`python package.py` passed. The package derives version 0.5.1 from the TOC and
+writes `dist/CraftGlance-0.5.1.zip`. Archive integrity, the single `CraftGlance/`
+root, all seven packaged files against source, version consistency and MIT
+license inclusion passed. The installed 0.5.0 files and existing 0.5.0 ZIP were
+verified unchanged; no candidate was installed and no game actions were taken.
+
+The regression coverage includes valid currency quantities and unavailable or
+invalid currency data, safe refresh fallback and subsequent recovery without a
+retry loop, scanned-zero owners beside unscanned inventories, retained stale
+bank observations excluded from planning until a successful scan, and realm-key
+migration with saved inventory retained.
+
+Panel fixtures also cover thrown and malformed recipe plans, malformed
+schematics, material-list and scan-summary failures, one-time error logging,
+recovery, debounce, the hidden-panel early return and collapse after a failed
+refresh. Stale bank counts remain visible with `*`, muted styling and an age in
+the hover details, while the footer reads `Your bank: rescan needed`. These UI
+states passed simulated checks for 0.5.1.
+The currency panel fixture confirmed that 100 owned currency with 3 required
+shows Craft now 33 and Known stock 33, with `Bags and owned currency` wording.
+Returning to an item-only recipe restores the bags-only wording.
+
+## Historical automated checks
 
 Both suites passed under Lua 5.1 using the Lupa runtime.
 
@@ -114,7 +170,7 @@ Both suites passed under Lua 5.1 using the Lupa runtime.
   and corner texture coordinates that preserve the native outer artwork while
   collapsed and restore the full corner atlases when expanded.
 
-Temporary API diagnostics were used during verification. The repository and
-release ZIP contain addon source, documentation and the MIT license. Player
-names and SavedVariables files are excluded from the published verification
-records and archive.
+Temporary API diagnostics were used during the historical verification. The
+repository and package contain addon source, documentation and the MIT license.
+The alt-bank report above uses character names supplied by the user. Raw
+SavedVariables files are excluded from the verification records and archive.

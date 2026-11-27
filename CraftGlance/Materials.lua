@@ -55,8 +55,9 @@ local function identify(ingredient)
         local name = C_Item and C_Item.GetItemInfo and C_Item.GetItemInfo(ingredient.itemID)
         return name or ("Item #" .. ingredient.itemID), addon.GetBagCount(ingredient.itemID)
     end
-    local currency = C_CurrencyInfo and C_CurrencyInfo.GetCurrencyInfo(ingredient.currencyID)
-    return currency and currency.name or ("Currency #" .. ingredient.currencyID), nil
+    local currency = C_CurrencyInfo and C_CurrencyInfo.GetCurrencyInfo and C_CurrencyInfo.GetCurrencyInfo(ingredient.currencyID)
+    if type(currency) ~= "table" then return "Currency #" .. ingredient.currencyID, nil end
+    return currency.name or ("Currency #" .. ingredient.currencyID), validCount(currency.quantity) and currency.quantity or nil
 end
 
 local function knownStock(ingredient)
@@ -65,7 +66,7 @@ local function knownStock(ingredient)
     for _, source in ipairs(ingredient.sources) do
         -- Current bags are already counted from the live bag-only query above.
         if not (source.isCurrent and source.location == "bags") then
-            if source.scanned and validCount(source.count) then
+            if source.scanned and not source.stale and validCount(source.count) then
                 total = total + source.count
             else
                 unknown = true
