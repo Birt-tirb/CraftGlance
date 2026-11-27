@@ -14,6 +14,10 @@ local extraOwners, secondBags = 0, 0
 local function noop() end
 local cornerNames = {"TopLeftCorner", "TopRightCorner", "BottomLeftCorner", "BottomRightCorner"}
 local atlasInfo = {}
+for _, name in ipairs({"Profession-Background-Overview", "Profession-Background-Template2"}) do
+    atlasInfo[name] = {file = "FixtureBackground", width = 800, height = 1000,
+        leftTexCoord = 0.125, rightTexCoord = 0.375, topTexCoord = 0.25, bottomTexCoord = 0.75}
+end
 for _, name in ipairs(cornerNames) do
     atlasInfo["Fixture" .. name] = {file = "FixtureBorder", width = 64,
         height = name:find("Top", 1, true) and 64 or 32,
@@ -24,7 +28,7 @@ local function widget(kind, name, parent)
     local frame = {kind = kind, parent = parent, shown = true, enabled = true, scripts = {}, events = {}, points = {}}
     for _, key in ipairs({"SetJustifyH", "SetJustifyV", "SetFrameLevel", "SetBackdrop",
         "SetBackdropColor", "SetBackdropBorderColor", "SetAutoFocus", "SetMaxLetters",
-        "SetHitRectInsets", "EnableMouse", "ClearFocus", "SetAllPoints"}) do frame[key] = noop end
+        "SetHitRectInsets", "EnableMouse", "ClearFocus", "SetAllPoints", "SetHorizTile", "SetVertTile"}) do frame[key] = noop end
     function frame:SetPoint(...)
         local point = {...}
         self.point = point

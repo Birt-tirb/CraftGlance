@@ -13,10 +13,9 @@ planning while retaining its last observation for display, and stable realm-key
 migration. Automated results for these changes are recorded below.
 The remaining live checks require player interaction.
 
-The latest tab palette is installed. Its visual reload check is pending. The
-selected tabs use a softer brown tint and the hover glow is reduced. The live
-inventory and compact-layout passes below were observed before this cosmetic
-tab change.
+The brown tab palette and fixed background scale passed live visual checks
+after the final UI reload. The inventory checks below preceded those cosmetic
+changes and retain their original observed quantities.
 
 ## Passed in the actual corrected 0.5.1 client display
 
@@ -44,9 +43,14 @@ After the corrected reload, the following checks passed in client
 | Cooking and scanned-zero owners | Basic Campfire showed Simple Wood Need 1, You Bags 0 / Bank 0, Birt Bags 0 / Bank 0 and Tirb Bags 0 / Bank Not scanned, with Craft now 0 and Known stock 0. |
 | Two-ingredient compact Cooking view | Herb Baked Egg displayed both ingredients and all three owners without a scrollbar. Small Egg showed Need 1 and You Bags 2 / Bank 0. Mild Spices showed Need 1, You Bags 0 / Bank 0 and Missing 1. Each ingredient also showed Birt Bags 0 / Bank 0 and Tirb Bags 0 / Bank Not scanned. Craft now and Known stock were both 0. |
 | Collapse and expansion | Collapsing and expanding restored the complete gold frame and compact content. |
+| Brown tabs and consistent background edge | After the final UI reload, both selected-tab states showed the brown palette. This Recipe and the full, long All Materials list showed the same black and gold header edge at the same position beneath the tabs. Searching `linen` shortened All Materials while the header edge stayed fixed. |
+| Borders after background cropping | Collapse and expansion preserved the native gold frame. Returning to This Recipe showed Craft now 4, Known stock 14 and three recorded characters. |
 
 The session finished on Tolo's First Aid Linen Bandage view, with Craft now 4,
 Known stock 14 and the bank closed. All four test cloth were restored to bags.
+The cosmetic verification involved no item movements. Its saved bank cells
+showed Linen Cloth Bank `0*` and Light Leather Bank `11*`, with the rescan-needed
+footer. These values were retained, last-observed bank counts marked for rescan.
 
 ## User-reported 0.5.0 alt-bank evidence
 
@@ -145,8 +149,6 @@ display changes.
 
 ## Still needs an in-game check
 
-- Latest tab palette. Reload the UI and visually confirm the softer selected
-  brown tabs and reduced hover glow.
 - Purchased character-bank tabs. Open a bank with additional purchased tabs,
   confirm every tab's contents appear, record the tab/container IDs, then
   reload and confirm the saved quantities survive. All additional bank tabs
@@ -172,12 +174,15 @@ and its observed-client regression cases. These cover legacy `3:0` and exact
 GUID-local keys, saved stock and ages, scanned-zero owners, later realm-API
 availability changes and isolation by GUID realm component, region and faction.
 
-Both suites passed again with the latest tab-palette source.
+Both suites passed again after the final correction to the background scale. The
+fixture texture stand-ins support the atlas and tiling API calls used by that
+correction. Header alignment and short-view cropping were checked in the live
+client as described above.
 
-`python package.py` passed for the latest corrected candidate. Archive integrity,
+`python package.py` passed for the final candidate with the background correction. Archive integrity,
 the single `CraftGlance/` root, all seven packaged files against source, version
-consistency and MIT license inclusion passed. It derives
-version 0.5.1 from the TOC and writes `dist/CraftGlance-0.5.1.zip`. The local
+consistency and MIT license inclusion passed. It derives version
+0.5.1 from the TOC and writes `dist/CraftGlance-0.5.1.zip`. The local
 candidate installation and game actions described above were user-authorized.
 
 The regression coverage includes valid currency quantities and unavailable or

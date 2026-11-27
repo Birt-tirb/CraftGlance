@@ -37,6 +37,8 @@ layout checks. All four test cloth were restored to the main character's bags.
   Their zero counts stay distinct from **Not scanned** inventories.
 - Short lists fit the panel's height. Longer lists grow up to the profession
   window's height limit, with a scrollbar only when the contents overflow.
+  The background keeps its header edge aligned beneath the tabs in both views.
+  Shorter panels crop the lower background while preserving the native borders.
 - Bags are recorded on login and inventory changes. Character banks are scanned
   only while accessible at a bank. Counts, owner names and observation times
   survive logout and UI reload. Unscanned banks are labelled clearly.
@@ -116,11 +118,11 @@ The archive is written to `dist/CraftGlance-0.5.1.zip`.
 
 Both Lua suites passed for this review using Lupa's explicit Lua 5.1 runtime,
 including the observed blank-realm migration regression. The review environment
-had no standalone `lua5.1` executable. The latest candidate package passed
-integrity, structure, version, source-equality and MIT license checks. The softer tab palette is
-installed and awaits visual confirmation after a UI reload. Additional
-purchased bank tabs and later-day identity persistence remain manual coverage
-gaps.
+had no standalone `lua5.1` executable. The final candidate package passed
+integrity, structure, version, source-equality and MIT license checks. The brown tab palette,
+fixed header edge, cropping for short lists and native borders passed live visual
+checks. Additional purchased bank tabs and later-day identity persistence
+remain manual coverage gaps.
 
 See [TESTING.md](TESTING.md) for the release's actual in-game checks and any
 checks still awaiting player interaction.

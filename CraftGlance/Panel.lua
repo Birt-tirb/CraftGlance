@@ -156,6 +156,26 @@ local function renderOwners(row, sources, required)
     return math.max(1, #holdings) * 24 + 8
 end
 
+local function fitBackground()
+    -- Crop shorter views from one fixed-height background so its header rule
+    -- stays beneath the tabs instead of moving with the material list height.
+    local referenceHeight = collapsed and panel:GetHeight() or maxPanelHeight
+    for _, layer in ipairs({
+        {panel.Bg, "Profession-Background-Overview", 23},
+        {panel.InsetBg, "Profession-Background-Template2", 24},
+    }) do
+        local texture, atlas, inset = unpack(layer)
+        local info = C_Texture.GetAtlasInfo(atlas)
+        if info and (info.file or info.filename) then
+            local fraction = math.max(0, math.min(1, (panel:GetHeight() - inset) / (referenceHeight - inset)))
+            texture:SetTexture(info.file or info.filename)
+            texture:SetHorizTile(false); texture:SetVertTile(false)
+            texture:SetTexCoord(info.leftTexCoord, info.rightTexCoord, info.topTexCoord,
+                info.topTexCoord + (info.bottomTexCoord - info.topTexCoord) * fraction)
+        end
+    end
+end
+
 local function renderRows(entries)
     local top, hasMaterials = 0, false
     for index, entry in ipairs(entries) do
@@ -232,6 +252,7 @@ local function renderRows(entries)
     -- Fit short lists, then keep the window bounded and scroll longer lists.
     local listTop = view == "recipe" and 190 or 166
     panel:SetHeight(math.min(maxPanelHeight, math.max(280, listTop + 69 + body:GetHeight())))
+    fitBackground()
     tableHeader:SetShown(hasMaterials)
     needHeader:SetShown(hasMaterials and view == "recipe")
     scroll:UpdateScrollChildRect()
@@ -283,6 +304,7 @@ local function position()
     panel:SetWidth(collapsed and compactWidth or width)
     maxPanelHeight = math.max(500, math.min(700, frame:GetHeight() - 45))
     panel:SetHeight(collapsed and 52 or maxPanelHeight)
+    fitBackground()
     collapse:ClearAllPoints()
     collapse:SetPoint("TOPRIGHT", -5, -3)
     collapse:SetText(collapsed and "+" or "-")
@@ -417,6 +439,7 @@ local function refreshFallback()
     hero:SetShown(not collapsed); scanText:SetShown(not collapsed)
     if collapsed then return end
     panel:SetHeight(280)
+    fitBackground()
     hero:ClearAllPoints(); hero:SetPoint("TOPLEFT", 14, -112); hero:SetHeight(44)
     headline:SetText("Recipe loading"); tint(headline, colors.text)
     summary:SetText("Unable to read materials. Select a recipe to try again."); summary:Show()
