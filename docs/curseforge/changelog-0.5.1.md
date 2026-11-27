@@ -34,4 +34,4 @@ the final tab/background appearance. Both Lua 5.1 regression suites passed with 
 
 Additional purchased bank tabs and later-day identity persistence remain live
 coverage gaps. Currency recipes and injected refresh/scan failures have
-automated coverage. This file is prepared as a **Beta** candidate for review.
+automated coverage. The project owner selected **Release** for this 0.5.1 file.

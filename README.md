@@ -6,10 +6,12 @@ A crafting resource tracker for **World of Warcraft Forever**. Select a recipe
 in your profession window to see what you can craft now, what is missing, and
 which recorded character or bank holds more of the materials.
 
-**0.5.1 is prepared as a Beta upload candidate** on branch `craftglance-0.5.1`.
-[CurseForge upload instructions](https://github.com/Birt-tirb/CraftGlance/blob/craftglance-0.5.1/docs/curseforge/upload-settings.md)
-and the ready-to-paste description and changelog are included in the repository.
-The main branch and published 0.5.0 release remain unchanged.
+**0.5.1 is a Release**, as selected by the project owner, for Forever 1.60.1.
+The [CurseForge project](https://www.curseforge.com/wow/addons/craftglance)
+has been created and is awaiting moderator approval. Source and upload metadata
+are on branch `craftglance-0.5.1`; the main branch and GitHub 0.5.0 release remain
+unchanged. [CurseForge upload details](https://github.com/Birt-tirb/CraftGlance/blob/craftglance-0.5.1/docs/curseforge/upload-settings.md)
+are included in the repository.
 
 The earlier 0.5.1 candidate passed live bank transfers, character switches in
 both directions, saved alt-bank checks, scanned-zero rows and the final compact
@@ -149,13 +151,13 @@ The archive is written to `dist/CraftGlance-0.5.1.zip`.
 
 Both Lua suites passed for this review using Lupa's explicit Lua 5.1 runtime,
 including the observed blank-realm migration regression. The review environment
-had no standalone `lua5.1` executable. The final candidate package passed
+had no standalone `lua5.1` executable. The release package passed
 integrity, structure, version, source-equality and MIT license checks. The brown tab palette,
 fixed header edge, cropping for short lists and native borders passed live visual
 checks. Additional purchased bank tabs and later-day identity persistence
 remain manual coverage gaps.
 
-See [TESTING.md](TESTING.md) for the candidate's recorded in-game checks and any
+See [TESTING.md](TESTING.md) for the release's recorded in-game checks and any
 checks still awaiting player interaction.
 
 ## License

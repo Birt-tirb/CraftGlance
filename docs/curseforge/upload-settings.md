@@ -1,17 +1,18 @@
 # CraftGlance 0.5.1 upload settings
 
-Prepared metadata for a manual CurseForge submission. Project creation, file
-submission, slug validation and moderation approval are pending.
+Metadata for the [CraftGlance CurseForge project](https://www.curseforge.com/wow/addons/craftglance),
+project ID **1835951**. The project has been created with MIT selected and is
+awaiting moderator approval. The owner explicitly selected **Release** for 0.5.1.
 
 | Field | Prepared value |
 | --- | --- |
 | Game | World of Warcraft |
 | Project name | CraftGlance |
-| Suggested slug | `craftglance`, subject to availability and validation |
+| Project slug | `craftglance` |
 | Summary | See craft counts and material stock across your bags, character banks and recorded alts. |
 | Class | Addons |
 | Main category | Professions |
-| Additional category | Bags & Inventory, if offered in the form |
+| Additional category | Bags & Inventory |
 | License | MIT License |
 | Project icon file | `docs/images/craftglance-icon.png` |
 | Comments | Enabled |
@@ -21,7 +22,7 @@ submission, slug validation and moderation approval are pending.
 | Issues URL | [https://github.com/Birt-tirb/CraftGlance/issues](https://github.com/Birt-tirb/CraftGlance/issues) |
 | Upload file | `CraftGlance-0.5.1.zip` (generated under `dist/`; at the root of the upload pack) |
 | File display name | CraftGlance 0.5.1 |
-| File release type | **Beta**, recommended for this candidate's tested scope |
+| File release type | **Release**, explicitly selected by the project owner |
 | Supported flavor | **Forever** |
 | Supported game version | **1.60.1** only |
 | Interface in the TOC | **16001** |
@@ -30,22 +31,23 @@ submission, slug validation and moderation approval are pending.
 | Dependencies | None |
 
 Use the form's Forever 1.60.1 option for this file. Retail and Classic variants
-have no compatibility claim in this candidate. The supported-version selection
-and exact upload validation are still pending in the submission form.
-The archive's `_Camelot.toc` suffix has not been validated by a CurseForge
-submission.
+have no compatibility claim in this release. The initial package uploaded
+successfully with Forever **1.60.1** and **Release** selected. That submission
+accepted the archive's `_Camelot.toc` suffix; moderator approval remains pending.
+The final package includes these corrected Release documents.
 CurseForge lets authors select supported game versions for each uploaded file.
 [Creating and Submitting a Project](https://support.curseforge.com/support/solutions/articles/9000197241-creating-and-submitting-a-project)
 
 ## Release type and app visibility
 
-Beta matches the current limited live coverage. The latest inventory, currency and visible-row fixes passed automated checks; the recorded live checks cover the earlier candidate. Extra purchased bank tabs and
-later-day identity persistence still need in-game verification. Currency and
-injected failure paths have automated coverage.
+The project owner selected **Release**. The latest inventory, currency and
+visible-row fixes passed automated checks; the recorded live checks cover the
+earlier candidate. Extra purchased bank tabs and later-day identity persistence
+still need in-game verification. Currency and injected failure paths have
+automated coverage. The Release label does not change this verification scope.
 
-CurseForge documents that Beta files reach app users who opt into Beta files,
-and a project needs at least one **Release** file before it syncs to the app.
-Account for that separately when deciding an initial public release type.
+CurseForge documents that a project needs at least one **Release** file before
+it syncs to the app. Approval and synchronization remain controlled by CurseForge.
 [Creating and Submitting a Project](https://support.curseforge.com/support/solutions/articles/9000197241-creating-and-submitting-a-project)
 
 ## Project icon
@@ -84,6 +86,7 @@ Use the generated ZIP with one top-level `CraftGlance/` folder. CurseForge
 requires an actual ZIP archive, and submission sends it through moderation.
 [Creating and Submitting a Project](https://support.curseforge.com/support/solutions/articles/9000197241-creating-and-submitting-a-project)
 
-Keep the candidate on branch `craftglance-0.5.1` for review. The existing main
-branch and published 0.5.0 release remain the baseline. This preparation adds
-no merge, tag, GitHub release or CurseForge submission.
+Source remains on branch `craftglance-0.5.1` with draft PR #1. The existing main
+branch and published GitHub 0.5.0 release remain unchanged. Project creation
+and a CurseForge file submission were authorized by the owner; this work adds
+no merge, tag or GitHub release.

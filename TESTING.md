@@ -1,13 +1,17 @@
-# CraftGlance 0.5.1 review candidate verification
+# CraftGlance 0.5.1 release verification
 
 Prepared on 27 November 2026 on branch `craftglance-0.5.1`, based on the 0.5.0
-release at `08d2e58`. This candidate is for branch review. The user authorized a
-local 0.5.1 installation and live verification on 27 November 2026. The main branch and
-published 0.5.0 ZIP remain the release baseline.
+release at `08d2e58`. The project owner selected **Release** for the CurseForge
+0.5.1 file and **MIT** for the project license. The
+[CurseForge project](https://www.curseforge.com/wow/addons/craftglance) has been
+created and is awaiting moderator approval. The user authorized a local 0.5.1
+installation and live verification on 27 November 2026. The main branch and
+published GitHub 0.5.0 ZIP remain unchanged. Historical candidate observations
+below retain their original scope; the Release label does not add live coverage.
 
 ## 0.5.1 verification status
 
-The candidate adds owned-currency counts, safe panel-refresh fallback and
+The release adds owned-currency counts, safe panel-refresh fallback and
 recovery, visible scanned-zero alt holdings, stale-bank exclusion from stock
 planning while retaining its last observation for display, and stable realm-key
 migration. Automated results for these changes are recorded below.
@@ -198,7 +202,7 @@ fixture texture stand-ins support the atlas and tiling API calls used by that
 correction. Header alignment and short-view cropping were checked in the live
 client as described above.
 
-`python package.py` passed for the final candidate with the background correction. Archive integrity,
+`python package.py` passed for the release package. Archive integrity,
 the single `CraftGlance/` root, all seven packaged files against source, version
 consistency and MIT license inclusion passed. It derives version
 0.5.1 from the TOC and writes `dist/CraftGlance-0.5.1.zip`. The local
