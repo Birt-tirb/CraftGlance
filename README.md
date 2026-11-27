@@ -1,16 +1,47 @@
 # CraftGlance 0.5.1
 
-A crafting resource tracker for **World of Warcraft Forever**. Select a recipe
-in your own profession window to see how many crafts your bags support and
-where your materials are stored across recorded characters and banks.
+<img src="https://raw.githubusercontent.com/Birt-tirb/CraftGlance/3a3e1844bfac1e4483d368a44f3813f88948f1ee/docs/images/craftglance-icon.png" width="96" height="96" alt="CraftGlance project icon">
 
-Version 0.5.1 is a review candidate on branch `craftglance-0.5.1`. Its manual
-in-game verification, including the user-authorized local installation, is
-tracked in [TESTING.md](TESTING.md). The main branch and published 0.5.0 ZIP
-remain the release baseline.
-The earlier candidate passed same-session reload and both character-switch
-directions, saved alt-bank checks, deposit/withdrawal counts and compact Cooking
-layout checks. All four test cloth were restored to the main character's bags.
+A crafting resource tracker for **World of Warcraft Forever**. Select a recipe
+in your profession window to see what you can craft now, what is missing, and
+which recorded character or bank holds more of the materials.
+
+**0.5.1 is prepared as a Beta upload candidate** on branch `craftglance-0.5.1`.
+[CurseForge upload instructions](https://github.com/Birt-tirb/CraftGlance/blob/craftglance-0.5.1/docs/curseforge/upload-settings.md)
+and the ready-to-paste description and changelog are included in the repository.
+The main branch and published 0.5.0 release remain unchanged.
+
+The earlier 0.5.1 candidate passed live bank transfers, character switches in
+both directions, saved alt-bank checks, scanned-zero rows and the final compact
+layout. The latest inventory, currency and visible-row fixes passed both Lua
+5.1 suites; their live regression check remains separate. See [TESTING.md](TESTING.md)
+for the exact scope and remaining checks.
+
+## Screenshots
+
+### This Recipe
+
+Craftable count from current bags, per-craft requirements, and full stock by
+character beside the native profession window.
+
+![CraftGlance This Recipe beside First Aid](https://raw.githubusercontent.com/Birt-tirb/CraftGlance/3a3e1844bfac1e4483d368a44f3813f88948f1ee/docs/images/01-this-recipe.png)
+
+### Find a material
+
+Search recorded Crafting Reagents by name or item ID.
+
+![CraftGlance material search for linen](https://raw.githubusercontent.com/Birt-tirb/CraftGlance/3a3e1844bfac1e4483d368a44f3813f88948f1ee/docs/images/02-material-search.png)
+
+### All Materials
+
+A compact owner table for each reagent, with scrolling when the list is longer
+than the attached panel.
+
+![CraftGlance material list beside Cooking](https://raw.githubusercontent.com/Birt-tirb/CraftGlance/3a3e1844bfac1e4483d368a44f3813f88948f1ee/docs/images/03-all-materials.png)
+
+The screenshots are supplied in-game captures. Starred bank values such as
+**0\*** and **11\*** are last observations marked for rescan and excluded from
+Known stock until verified again. **Not scanned** identifies unknown inventory.
 
 ## Features
 
@@ -124,7 +155,7 @@ fixed header edge, cropping for short lists and native borders passed live visua
 checks. Additional purchased bank tabs and later-day identity persistence
 remain manual coverage gaps.
 
-See [TESTING.md](TESTING.md) for the release's actual in-game checks and any
+See [TESTING.md](TESTING.md) for the candidate's recorded in-game checks and any
 checks still awaiting player interaction.
 
 ## License
@@ -132,3 +163,12 @@ checks still awaiting player interaction.
 [MIT](LICENSE), copyright 2026 Birt-tirb. The same license and attribution notice
 are included inside the installable ZIP. Fonts and textures are supplied by WoW
 at runtime and are not redistributed.
+
+## Image credits
+
+The three screenshots were supplied by the project owner and are included
+without edits. World of Warcraft gameplay and interface artwork retain their
+respective owners' rights and are not relicensed under MIT. The original
+CraftGlance project icon was created for this project with built-in image
+generation; its prompt is recorded with the upload materials. The installable
+addon ZIP includes no screenshots or bundled game textures.
