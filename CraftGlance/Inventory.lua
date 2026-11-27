@@ -26,6 +26,9 @@ local function snapshot(value)
     if type(value.items) ~= "table" then value.items = {} end
     if type(value.containers) ~= "table" then value.containers = {} end
     value.scanned = value.scanned == true
+    -- Older snapshots recorded failed scans in state without clearing scanned.
+    value.stale = value.stale == true or
+        (value.scanned and value.state ~= nil and value.state ~= "scanned")
     if not number(value.updatedAt) then value.updatedAt = nil end
     return value
 end
@@ -33,23 +36,109 @@ end
 local function roster()
     if type(CraftGlanceDB) ~= "table" then CraftGlanceDB = {} end
     if type(CraftGlanceDB.characters) ~= "table" then CraftGlanceDB.characters = {} end
-    CraftGlanceDB.inventoryVersion = 1
+    CraftGlanceDB.inventoryVersion = 2
     return CraftGlanceDB.characters
+end
+
+local function identityNumber(value)
+    if number(value) and value > 0 and value == math.floor(value) then return value end
+end
+
+local function realmName(value)
+    if not plain(value) or type(value) ~= "string" then return nil end
+    local normalized = value:lower():gsub("%s+", "")
+    if normalized ~= "" then return normalized end
+end
+
+local function guidRealm(guid)
+    if not plain(guid) or type(guid) ~= "string" then return nil end
+    local realm = guid:match("^Player%-(%d+)%-%x+$")
+    return identityNumber(tonumber(realm))
+end
+
+local function scopeKey(region, realm, guid)
+    if not identityNumber(region) then return nil end
+    local component = guidRealm(guid)
+    if component then return "realm-guid-v1:" .. region .. ":" .. component end
+    local normalized = realmName(realm)
+    if normalized then return "realm-v2:" .. region .. ":" .. normalized end
+end
+
+local function migrateScope(character)
+    local key, normalized = character.ruleset, realmName(character.realm)
+    if type(key) ~= "string" then return end
+    local component = guidRealm(character.guid)
+    local region, identity = key:match("^realm%-guid%-v1:(%d+):(%d+)$")
+    local kind = region and "guid"
+    if not region then
+        region, identity = key:match("^realm%-v2:(%d+):(.+)$")
+        kind = region and "name"
+    end
+    if not region then
+        region, identity = key:match("^(%d+):(.*)$")
+        kind = region and "legacy"
+    end
+    if not region and component and key == "unverified:" .. character.guid then
+        region, kind = character.region, "unverified"
+    end
+    region = identityNumber(tonumber(region))
+    if not region or (character.region ~= nil and character.region ~= region) then return end
+    local storedID = identityNumber(character.realmID)
+    if character.realmID ~= nil and character.realmID ~= 0 and not storedID then return end
+    local legacyID
+    if kind == "guid" then
+        if not component or identity ~= tostring(component) then return end
+    elseif kind == "name" then
+        if not normalized or identity ~= normalized then return end
+    elseif kind == "legacy" then
+        legacyID = identityNumber(tonumber(identity))
+        if legacyID then
+            if tostring(legacyID) ~= identity or (storedID and storedID ~= legacyID) then return end
+        elseif (identity == "0" or identity == "") and component then
+            -- Forever can report no realm name and a zero or missing realm ID. Only the
+            -- individual Player GUID can disambiguate those old shared keys.
+            if storedID then return end
+        elseif not normalized or realmName(identity) ~= normalized then
+            return
+        end
+    end
+    local stable = scopeKey(region, character.realm, character.guid)
+    if not stable then return end
+    character.region = region
+    character.realmID = storedID or legacyID
+    character.ruleset = stable
 end
 
 local function ensureCharacter()
     local guid = call(UnitGUID, "player")
     local name, realm = call(UnitName, "player"), call(GetRealmName)
-    if type(guid) ~= "string" or type(name) ~= "string" or type(realm) ~= "string" then return nil end
+    if type(guid) ~= "string" or type(name) ~= "string" then return nil end
+    if type(realm) ~= "string" then
+        if not guidRealm(guid) then return nil end
+        realm = ""
+    end
     local characters = roster()
+    for _, recorded in pairs(characters) do
+        if type(recorded) == "table" then migrateScope(recorded) end
+    end
     local character = characters[guid]
     if type(character) ~= "table" then character = {} end
+    local sameGUIDRealm = character.guid == guid and guidRealm(guid) ~= nil
+    local sameRealm = sameGUIDRealm or realmName(character.realm) == realmName(realm)
+    local region = identityNumber(call(GetCurrentRegion))
+    local realmID = identityNumber(call(GetRealmID))
+    -- A missing API result must not erase identity learned for this same GUID.
+    if not region and sameRealm then region = identityNumber(character.region) end
+    if not realmID and sameRealm and character.region == region then realmID = identityNumber(character.realmID) end
+    if not realmName(realm) and sameRealm and character.region == region and realmName(character.realm) then
+        realm = character.realm
+    end
     character.guid, character.name, character.realm = guid, name, realm
     character.faction = call(UnitFactionGroup, "player") or "Unknown"
-    character.realmID = call(GetRealmID)
-    character.region = call(GetCurrentRegion)
-    -- Realm identity is a conservative boundary until Forever exposes a ruleset API.
-    character.ruleset = tostring(character.region or "") .. ":" .. tostring(character.realmID or realm)
+    character.realmID, character.region = realmID, region
+    -- Prefer the stable realm component of a real Player GUID even if APIs later
+    -- supply names or IDs. Unknown regions remain isolated to this character.
+    character.ruleset = scopeKey(region, realm, guid) or ("unverified:" .. guid)
     character.bags, character.bank = snapshot(character.bags), snapshot(character.bank)
     character.lastSeen = now()
     characters[guid], current = character, character
@@ -74,7 +163,7 @@ local function readContainers(ids, names, bank)
     if not C_Container or not C_Container.GetContainerNumSlots or not C_Container.GetContainerItemInfo then
         return nil, "unavailable"
     end
-    local result = {scanned = true, updatedAt = now(), state = "scanned", items = {}, containers = {}}
+    local result = {scanned = true, stale = false, updatedAt = now(), state = "scanned", items = {}, containers = {}}
     for _, bagID in ipairs(ids) do
         local slots = call(C_Container.GetContainerNumSlots, bagID)
         if not number(slots) or slots ~= math.floor(slots) or (bank and slots == 0) then return nil, "unavailable" end
@@ -87,7 +176,8 @@ local function readContainers(ids, names, bank)
             if not ok or not plain(info) then return nil, "unavailable" end
             if info then
                 local itemID, count = info.itemID, info.stackCount
-                if not number(itemID) or itemID == 0 or not number(count) then return nil, "unavailable" end
+                if not number(itemID) or itemID == 0 then return nil, "unavailable" end
+                if not number(count) then return nil, "unavailable", itemID end
                 container.stacks[#container.stacks + 1] = {
                     slot = slot, itemID = itemID, count = count,
                     link = plain(info.hyperlink) and info.hyperlink or nil,
@@ -95,9 +185,8 @@ local function readContainers(ids, names, bank)
                 result.items[itemID] = (result.items[itemID] or 0) + count
             elseif C_Container.GetContainerItemID then
                 local idOK, itemID = pcall(C_Container.GetContainerItemID, bagID, slot)
-                if not idOK or not plain(itemID) or (itemID ~= nil and itemID ~= 0) then
-                    return nil, "unavailable"
-                end
+                if not idOK or not plain(itemID) then return nil, "unavailable" end
+                if itemID ~= nil and itemID ~= 0 then return nil, "unavailable", itemID end
             end
         end
         result.containers[bagID] = container
@@ -110,7 +199,11 @@ function addon.ScanBags()
     if not character then return false end
     local observed, reason = readContainers(bagIDs())
     bagsObserved = observed ~= nil
-    if observed then character.bags = observed else character.bags.state = reason end
+    if observed then
+        character.bags = observed
+    else
+        character.bags.state, character.bags.stale = reason, true
+    end
     changed()
     return observed ~= nil
 end
@@ -146,31 +239,40 @@ local function characterBankIDs()
     return ids, names
 end
 
+local waitingBankItemID
 function addon.ScanBank()
     if not bankOpen then return false end
     local character = ensureCharacter()
     if not character then return false end
     local ids, names = characterBankIDs()
     local observed, reason
+    waitingBankItemID = nil
     if ids and (#ids > 0 or next(character.bank.containers) == nil) then
-        observed, reason = readContainers(ids, names, true)
+        observed, reason, waitingBankItemID = readContainers(ids, names, true)
     else
         reason = type(names) == "string" and names or "unavailable"
     end
-    if observed then character.bank = observed else character.bank.state = reason or "unavailable" end
+    if observed then
+        character.bank = observed
+    else
+        character.bank.state = reason or "unavailable"
+        character.bank.stale = true
+    end
     changed()
     return observed ~= nil
 end
 
-local bankScanQueued = false
+local queuedBankScan
 local function queueBankScan()
-    if bankScanQueued then return end
+    if queuedBankScan then return end
     if not C_Timer or not C_Timer.After then addon.ScanBank(); return end
-    bankScanQueued = true
-    C_Timer.After(0.1, function()
-        bankScanQueued = false
-        if bankOpen then addon.ScanBank() end
-    end)
+    local function scanIfQueued()
+        if queuedBankScan ~= scanIfQueued then return end
+        queuedBankScan = nil
+        addon.ScanBank()
+    end
+    queuedBankScan = scanIfQueued
+    C_Timer.After(0.1, scanIfQueued)
 end
 
 function addon.GetBagCount(itemID)
@@ -183,7 +285,15 @@ function addon.GetBagCount(itemID)
 end
 
 local function compatible(character)
-    return current and character.faction == current.faction and character.ruleset == current.ruleset
+    if not current then return false end
+    migrateScope(character)
+    if character.faction ~= current.faction or character.ruleset ~= current.ruleset or
+        character.region ~= current.region then return false end
+    local component, currentComponent = guidRealm(character.guid), guidRealm(current.guid)
+    if component or currentComponent then return component ~= nil and component == currentComponent end
+    local realmID, currentID = identityNumber(character.realmID), identityNumber(current.realmID)
+    return realmName(character.realm) == realmName(current.realm) and
+        not (realmID and currentID and realmID ~= currentID)
 end
 
 local function source(character, location, itemID)
@@ -193,11 +303,14 @@ local function source(character, location, itemID)
     if not number(count) then count = nil end
     if isCurrent and location == "bags" then count = addon.GetBagCount(itemID) end
     local live = isCurrent and (location == "bags" and count ~= nil or location == "bank" and bankOpen and stored.state == "scanned")
+    local stale = stored.stale and not (isCurrent and location == "bags" and live)
+    if stale then live = false end
     return {
         guid = character.guid, name = character.name, realm = character.realm,
         faction = character.faction, ruleset = character.ruleset, location = location,
         count = count, updatedAt = stored.updatedAt, isCurrent = not not isCurrent,
-        scanned = count ~= nil and (stored.scanned or live), state = stored.state or "unscanned", live = not not live,
+        scanned = count ~= nil and (stored.scanned or live), stale = not not stale,
+        state = stored.state or "unscanned", live = not not live,
     }
 end
 
@@ -208,8 +321,7 @@ function addon.GetSources(itemID)
     for _, character in pairs(roster()) do
         if type(character) == "table" and compatible(character) then
             for _, location in ipairs({"bags", "bank"}) do
-                local row = source(character, location, itemID)
-                if row.isCurrent or not row.scanned or (number(row.count) and row.count > 0) then rows[#rows + 1] = row end
+                rows[#rows + 1] = source(character, location, itemID)
             end
         end
     end
@@ -284,7 +396,7 @@ function addon.GetScanSummary()
             }
             summary.characters[#summary.characters + 1] = row
             summary.characterCount = summary.characterCount + 1
-            if not row.bank.scanned then summary.unscannedBanks = summary.unscannedBanks + 1 end
+            if not row.bank.scanned or row.bank.stale then summary.unscannedBanks = summary.unscannedBanks + 1 end
             if row.isCurrent then summary.bags, summary.bank = row.bags, row.bank end
         end
     end
@@ -302,7 +414,10 @@ events:SetScript("OnEvent", function(_, event, name, success)
     elseif event == "GET_ITEM_INFO_RECEIVED" or event == "ITEM_DATA_LOAD_RESULT" then
         if number(name) then
             materialInfo[name] = nil
-            if success then itemRequests[name] = nil end
+            if success then
+                itemRequests[name] = nil
+                if name == waitingBankItemID then queueBankScan() end
+            end
             changed()
         end
     elseif event == "PLAYER_LOGIN" then
@@ -315,8 +430,14 @@ events:SetScript("OnEvent", function(_, event, name, success)
         queueBankScan()
     elseif event == "BANKFRAME_CLOSED" then
         bankOpen = false
+        queuedBankScan, waitingBankItemID = nil, nil
         addon.ScanBags()
     else
+        -- A bag or bank change can move stock between both snapshots. The old
+        -- bank count is safe to display, but cannot be trusted until the rescan.
+        if bankOpen and current then
+            current.bank.state, current.bank.stale = "pending", true
+        end
         addon.ScanBags()
         if bankOpen then queueBankScan() end
     end

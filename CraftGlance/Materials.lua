@@ -5,23 +5,41 @@ local function validCount(value)
         and value >= 0 and value < math.huge
 end
 
+local function reagentIdentity(reagent)
+    if type(reagent) ~= "table" then return end
+    if validCount(reagent.itemID) and reagent.itemID > 0 then return "itemID", reagent.itemID end
+    if validCount(reagent.currencyID) and reagent.currencyID > 0 then return "currencyID", reagent.currencyID end
+end
+
+local function requiredQuantity(slot, kind, id)
+    if slot.variableQuantities == nil then return slot.quantityRequired end
+    if type(slot.variableQuantities) ~= "table" then return nil end
+    for _, override in ipairs(slot.variableQuantities) do
+        if type(override) ~= "table" then return nil end
+        local otherKind, otherID = reagentIdentity(override.reagent)
+        if not otherKind then return nil end
+        if otherKind == kind and otherID == id then return override.quantity end
+    end
+    return slot.quantityRequired
+end
+
 local function ingredientsFrom(slots)
     local ingredients, ordered, incomplete = {}, {}, false
     if type(slots) ~= "table" then return ordered, true end
     for _, slot in ipairs(slots) do
         local basic = Enum and Enum.CraftingReagentType and slot.reagentType == Enum.CraftingReagentType.Basic
         if slot.required == true or (basic and slot.required ~= false) then
-            local options = slot.reagents or {}
-            local reagent = options[1]
-            local required = slot.quantityRequired
-            if #options ~= 1 or not reagent or not (reagent.itemID or reagent.currencyID)
-                or not validCount(required) or required < 1 or required ~= math.floor(required) then
+            local options = slot.reagents
+            local reagent = type(options) == "table" and #options == 1 and options[1]
+            local kind, id = reagentIdentity(reagent)
+            local required = kind and requiredQuantity(slot, kind, id)
+            if not validCount(required) or required < 1 or required ~= math.floor(required) then
                 incomplete = true
             else
-                local key = reagent.itemID and ("i" .. reagent.itemID) or ("c" .. reagent.currencyID)
+                local key = kind .. id
                 local ingredient = ingredients[key]
                 if not ingredient then
-                    ingredient = {reagent = reagent, itemID = reagent.itemID, currencyID = reagent.currencyID, required = 0}
+                    ingredient = {reagent = reagent, [kind] = id, required = 0}
                     ingredients[key] = ingredient
                     ordered[#ordered + 1] = ingredient
                 end
@@ -55,8 +73,11 @@ local function identify(ingredient)
         local name = C_Item and C_Item.GetItemInfo and C_Item.GetItemInfo(ingredient.itemID)
         return name or ("Item #" .. ingredient.itemID), addon.GetBagCount(ingredient.itemID)
     end
-    local currency = C_CurrencyInfo and C_CurrencyInfo.GetCurrencyInfo(ingredient.currencyID)
-    return currency and currency.name or ("Currency #" .. ingredient.currencyID), nil
+    local currency = C_CurrencyInfo and C_CurrencyInfo.GetCurrencyInfo and C_CurrencyInfo.GetCurrencyInfo(ingredient.currencyID)
+    if type(currency) ~= "table" then return "Currency #" .. ingredient.currencyID, nil end
+    local owned = validCount(currency.quantity) and currency.quantity or nil
+    local icon = validCount(currency.iconFileID) and currency.iconFileID > 0 and currency.iconFileID or nil
+    return currency.name or ("Currency #" .. ingredient.currencyID), owned, icon
 end
 
 local function knownStock(ingredient)
@@ -65,7 +86,7 @@ local function knownStock(ingredient)
     for _, source in ipairs(ingredient.sources) do
         -- Current bags are already counted from the live bag-only query above.
         if not (source.isCurrent and source.location == "bags") then
-            if source.scanned and validCount(source.count) then
+            if source.scanned and not source.stale and validCount(source.count) then
                 total = total + source.count
             else
                 unknown = true
@@ -80,7 +101,7 @@ function addon.BuildRecipePlan(slots)
     local plan = {ingredients = ingredients, incomplete = incomplete, stockUnknown = incomplete}
     local crafts, stockCrafts = math.huge, math.huge
     for _, ingredient in ipairs(ingredients) do
-        ingredient.name, ingredient.bags = identify(ingredient)
+        ingredient.name, ingredient.bags, ingredient.icon = identify(ingredient)
         ingredient.sources = ingredient.itemID and addon.GetSources(ingredient.itemID) or {}
         if validCount(ingredient.bags) then
             ingredient.missingOne = math.max(0, ingredient.required - ingredient.bags)

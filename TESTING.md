@@ -1,7 +1,74 @@
-# CraftGlance 0.5.0 verification
+# CraftGlance 0.5.1 release verification
 
-Checked on 25 November 2026 against the installed, running WoW Forever client
+Prepared on 27 November 2026 on branch `craftglance-0.5.1`, based on the 0.5.0
+release at `08d2e58`. The project owner selected **Release** for the CurseForge
+0.5.1 file and **MIT** for the project license. The
+[CurseForge project](https://www.curseforge.com/wow/addons/craftglance) has been
+created and is awaiting moderator approval. The user authorized a local 0.5.1
+installation and live verification on 27 November 2026. The main branch and
+published GitHub 0.5.0 ZIP remain unchanged. Historical candidate observations
+below retain their original scope; the Release label does not add live coverage.
+
+## 0.5.1 verification status
+
+The release adds owned-currency counts, safe panel-refresh fallback and
+recovery, visible scanned-zero alt holdings, stale-bank exclusion from stock
+planning while retaining its last observation for display, and stable realm-key
+migration. Automated results for these changes are recorded below.
+The remaining live checks require player interaction.
+
+The brown tab palette and fixed background scale passed live visual checks
+after the final UI reload. The inventory checks below preceded those cosmetic
+changes and retain their original observed quantities.
+
+## Passed in the actual corrected 0.5.1 client display
+
+The first installed candidate exposed a realm-migration regression. Craft now
+correctly showed 4, but the roster dropped to one character and Known stock
+showed 4. An in-game diagnostic found region 3, realm ID 0, blank realm names
+and legacy `3:0` scope keys. All three stored Player GUIDs had realm component
+6948. The corrected identity logic uses that GUID component while retaining
+region and faction boundaries. The saved character records remained present.
+
+After the corrected reload, the following checks passed in client
 **1.60.1.71091 / interface 16001**.
+
+| Check | Observed result |
+| --- | --- |
+| Restored roster and stock | Linen Bandage on Tolo showed You Bags 4 / Bank 0, Birt Bags 8 / Bank 1, Tirb Bags 1 / Bank Not scanned, Known stock 14 and three recorded characters. The saved bank observation age of approximately five minutes was retained. |
+| Native crafting quantities | Craft now 4 matched the native Linen Cloth 4/1 display and Create All count 4. |
+| Scanned zero beside unknown | All Materials, including a `leather` search, showed Light Leather with You Bags 11 / Bank 0, Birt Bags 0 / Bank 0 and Tirb Bags 0 / Bank Not scanned. Searching shortened the panel. |
+| Bank placement | The native bank opened alongside the attached profession panel. Bank slots and native crafting controls remained visible and unobstructed. |
+| Main-character deposit | Depositing all four Linen Cloth changed the native reagent display to 0/1, Create All to 0, Craft now to 0 and You to Bags 0 / Bank 4. Known stock stayed at 14 and Missing showed 1. |
+| Alt bank after character switch | On Birt, the native bank showed one Linen Cloth and bags held eight. The Herbalism All Materials view showed Linen Cloth as You Bags 8 / Bank 1, Tirb Bags 1 / Bank Not scanned and Tolo Bags 0 / Bank 4, with three recorded characters and the bank-live footer. |
+| Saved main-character observation on the alt | Hovering Tolo on Birt showed Bags 0 observed one minute earlier and Bank 4 observed two minutes earlier. Birt's quantities stayed at Bags 8 / Bank 1 throughout this check. |
+| Return to main before opening the bank | Back on Tolo with its bank still closed, Linen Bandage showed native 0/1, Craft now 0, Known stock 14, You Bags 0 / Bank 4, Birt Bags 8 / Bank 1 and Tirb Bags 1 / Bank Not scanned. The roster remained three characters and the saved bank age was approximately two minutes. |
+| Withdrawal and full restoration | Withdrawing all four test cloth restored native 4/1, Create All 4, Craft now 4 and You Bags 4 / Bank 0. Known stock stayed 14 and the missing-material note disappeared. The bank was empty and all four test cloth were back in bags. Closing the bank showed its just-scanned footer. No items were consumed. |
+| Cooking and scanned-zero owners | Basic Campfire showed Simple Wood Need 1, You Bags 0 / Bank 0, Birt Bags 0 / Bank 0 and Tirb Bags 0 / Bank Not scanned, with Craft now 0 and Known stock 0. |
+| Two-ingredient compact Cooking view | Herb Baked Egg displayed both ingredients and all three owners without a scrollbar. Small Egg showed Need 1 and You Bags 2 / Bank 0. Mild Spices showed Need 1, You Bags 0 / Bank 0 and Missing 1. Each ingredient also showed Birt Bags 0 / Bank 0 and Tirb Bags 0 / Bank Not scanned. Craft now and Known stock were both 0. |
+| Collapse and expansion | Collapsing and expanding restored the complete gold frame and compact content. |
+| Brown tabs and consistent background edge | After the final UI reload, both selected-tab states showed the brown palette. This Recipe and the full, long All Materials list showed the same black and gold header edge at the same position beneath the tabs. Searching `linen` shortened All Materials while the header edge stayed fixed. |
+| Borders after background cropping | Collapse and expansion preserved the native gold frame. Returning to This Recipe showed Craft now 4, Known stock 14 and three recorded characters. |
+
+The session finished on Tolo's First Aid Linen Bandage view, with Craft now 4,
+Known stock 14 and the bank closed. All four test cloth were restored to bags.
+The cosmetic verification involved no item movements. Its saved bank cells
+showed Linen Cloth Bank `0*` and Light Leather Bank `11*`, with the rescan-needed
+footer. These values were retained, last-observed bank counts marked for rescan.
+
+## User-reported 0.5.0 alt-bank evidence
+
+The user supplied two screenshots confirming a nonzero bank quantity on a
+second character and its saved display after returning to the main character.
+The reported main-character view showed current Bags 4, Birt Bags 8 / Bank 1,
+Tirb Bags 1 / Bank Not scanned, and Known stock 14. This establishes a 0.5.0
+alt-bank baseline from the user's screenshots. The fresh alt-bank check on Birt
+and return-to-main confirmation both passed with the corrected 0.5.1 candidate.
+
+## Historical 0.5.0 verification
+
+The following checks were performed on 25 November 2026 against the installed,
+running WoW Forever client **1.60.1.71091 / interface 16001**.
 
 ## Passed in the actual 0.5.0 client display
 
@@ -86,14 +153,78 @@ display changes.
 
 ## Still needs an in-game check
 
-- Alt bank stock. Visit the other character's bank, record its contents, then
-  return to the main character and verify its saved bank quantities. This
-  behavior has passed simulated regression tests.
+- Purchased character-bank tabs. Open a bank with additional purchased tabs,
+  confirm every tab's contents appear, record the tab/container IDs, then
+  reload and confirm the saved quantities survive. All additional bank tabs
+  were locked on both characters used for the current live checks.
+- Later-day realm identity persistence. Confirm the same roster and saved
+  inventory in a future session, including any change in realm-API availability.
+  Same-session reload and character switches in both directions passed with
+  the corrected candidate.
 
 Additional purchased bank bags, other resolutions/UI scales and professions
 beyond the recipes listed above have not been tested in-game.
+Currency recipes, deliberately failed bank scans and injected refresh faults
+have automated coverage. Those failure conditions were not forced in the live
+client.
 
-## Automated checks
+## 0.5.1 automated checks
+
+The post-review fixes passed the Lua 5.1 regression cases below. The live
+observations above were recorded on the earlier candidate.
+
+- Withdrawing two cloth and closing the bank before its delayed scan leaves
+  nine in bags and nine in Known stock. A delayed callback from that session
+  cannot overwrite a newly opened bank.
+- Depositing seven cloth into a bank holding two while the bag scan fails
+  leaves nine in Known stock after switching to an empty alt. The previous
+  seven stay visible as a stale bag observation.
+- An alt saved under the legacy key `3:` rejoins its roster through its Player
+  GUID. An open bank with a loading item retries on the matching item-data event.
+- A selected three-token recipe updates from 33 crafts to zero when its balance
+  falls from 100 to one. Currency rows show known balances, including zero,
+  and distinguish unavailable balances. A cost override of 25 takes precedence
+  over a base cost of three, giving four crafts from 100 tokens.
+- Scrolling a sparse list of 100 materials and 12 characters reaches all 1,200
+  holdings. The fixture checks that the frame pool stays bounded as the list
+  scrolls and that tooltips and counts follow the reused rows.
+
+Both `tests/materials.lua` and `tests/fixtures.lua` passed on 27 November 2026
+using `lupa.lua51.LuaRuntime`. The runtime's `_VERSION` reported `Lua 5.1`.
+A standalone `lua5.1` executable was unavailable in the review environment.
+Both suites passed again after adding the blank-realm/zero-ID migration fix
+and its observed-client regression cases. These cover legacy `3:0` and exact
+GUID-local keys, saved stock and ages, scanned-zero owners, later realm-API
+availability changes and isolation by GUID realm component, region and faction.
+
+Both suites passed again after the final correction to the background scale. The
+fixture texture stand-ins support the atlas and tiling API calls used by that
+correction. Header alignment and short-view cropping were checked in the live
+client as described above.
+
+`python package.py` passed for the release package. Archive integrity,
+the single `CraftGlance/` root, all seven packaged files against source, version
+consistency and MIT license inclusion passed. It derives version
+0.5.1 from the TOC and writes `dist/CraftGlance-0.5.1.zip`. The local
+candidate installation and game actions described above were user-authorized.
+
+The regression coverage includes valid currency quantities and unavailable or
+invalid currency data, safe refresh fallback and subsequent recovery without a
+retry loop, scanned-zero owners beside unscanned inventories, retained stale
+bank observations excluded from planning until a successful scan, and realm-key
+migration with saved inventory retained.
+
+Panel fixtures also cover thrown and malformed recipe plans, malformed
+schematics, material-list and scan-summary failures, one-time error logging,
+recovery, debounce, the hidden-panel early return and collapse after a failed
+refresh. Stale bank counts remain visible with `*`, muted styling and an age in
+the hover details, while the footer reads `Your bank: rescan needed`. These UI
+states passed simulated checks for 0.5.1.
+The currency panel fixture confirmed that 100 owned currency with 3 required
+shows Craft now 33 and Known stock 33, with `Bags and owned currency` wording.
+Returning to an item-only recipe restores the bags-only wording.
+
+## Historical automated checks
 
 Both suites passed under Lua 5.1 using the Lupa runtime.
 
@@ -114,7 +245,7 @@ Both suites passed under Lua 5.1 using the Lupa runtime.
   and corner texture coordinates that preserve the native outer artwork while
   collapsed and restore the full corner atlases when expanded.
 
-Temporary API diagnostics were used during verification. The repository and
-release ZIP contain addon source, documentation and the MIT license. Player
-names and SavedVariables files are excluded from the published verification
-records and archive.
+Temporary API diagnostics were used during the historical verification. The
+repository and package contain addon source, documentation and the MIT license.
+The alt-bank report above uses character names supplied by the user. Raw
+SavedVariables files are excluded from the verification records and archive.

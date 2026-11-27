@@ -1,0 +1,9 @@
+Original CraftGlance project icon
+Generator: built-in image_gen tool, new generation without image references.
+Opaque background requested. Original generated PNG copied without alteration.
+
+Use case: stylized-concept.
+Asset type: one original square project icon for CraftGlance, a fantasy crafting resource tracker. Create an opaque 1024 x 1024 PNG illustration, with a fully filled square background.
+Primary request: an original fantasy crafting-resource tracker emblem: a bronze-and-gold magnifying glass inspecting a clearly recognizable roll of pale linen and a single copper ingot, with one small herb leaf as a secondary accent. Deep warm-brown background, restrained antique-brass rim. Polished painterly fantasy inventory-icon rendering, entirely new artwork.
+Composition: bold central arrangement with clean silhouettes, a large simple magnifying-glass lens that frames the crafting materials, and strong separation between pale linen, copper and the dark background. Keep the emblem readable when reduced to a small project avatar. The restrained rim belongs within the square; leave comfortable safety space around the important shapes. Warm highlights, rich material texture, controlled detail.
+Constraints: exactly one square icon, opaque background, no text, no letters, no numbers, no watermark. No Blizzard, World of Warcraft or CurseForge logos, no copied existing game icons, no faction symbols and no characters. Do not use or reference any attached screenshots. Generate wholly original illustration.

@@ -1,5 +1,6 @@
 local addon, frames = {}, {}
 local player = {guid = "Player-A", name = "Ari", realm = "Normal", faction = "Alliance", realmID = 1}
+local normalizedRealm
 local clock, bankVisible, flags = 1000, false, nil
 local containers = {[0] = {{itemID = 2589, stackCount = 7}}, [5] = {{itemID = 2592, stackCount = 3}},
     [6] = {{itemID = 2589, stackCount = 2}}, [15] = {{itemID = 2589, stackCount = 100}}}
@@ -11,6 +12,7 @@ function GetServerTime() return clock end
 function GetCurrentRegion() return 3 end
 function GetRealmID() return player.realmID end
 function GetRealmName() return player.realm end
+function GetNormalizedRealmName() return normalizedRealm end
 function UnitName() return player.name end
 function UnitGUID() return player.guid end
 function UnitFactionGroup() return player.faction end
@@ -92,6 +94,123 @@ local function character(guid, name, bagCount, bankCount, scope)
         bank = {scanned = true, updatedAt = 800, items = {[2589] = bankCount}},
     }
 end
+local function findSource(guid, location)
+    for _, source in ipairs(addon.GetSources(2589)) do
+        if source.guid == guid and source.location == location then return source end
+    end
+    error("Missing source " .. guid .. " " .. location)
+end
+local function expectStaleBank()
+    local source = findSource(player.guid, "bank")
+    assert(source.scanned and source.count == 2 and source.updatedAt == 1000 and source.stale and not source.live,
+        "A failed bank scan retains the last observation and age, explicitly stale rather than live")
+    local stalePlan = addon.BuildRecipePlan({item(2589, 1)})
+    assert(stalePlan.craftNow == 7 and stalePlan.ingredients[1].knownTotal == 7
+        and stalePlan.craftWithKnownStock == 7 and stalePlan.stockUnknown,
+        "Retained stale bank stock is displayed but cannot increase trusted craft counts")
+end
+
+-- Keep the real delay between a stock change and the queued bank scan.
+do
+    local callbacks = {}
+    local function runTimer()
+        assert(table.remove(callbacks, 1), "Expected a queued bank scan")()
+    end
+    local originalDB, originalTimer = CraftGlanceDB, C_Timer
+    local originalBank = containers[6]
+    CraftGlanceDB = nil
+    C_Timer = {After = function(_, callback) callbacks[#callbacks + 1] = callback end}
+    loadModules()
+    local record = CraftGlanceDB.characters[player.guid]
+    bankVisible = true
+    event("BANKFRAME_OPENED")
+    bankVisible = false
+    event("BANKFRAME_CLOSED")
+    assert(record.bank.scanned and not record.bank.stale, "Closing after a successful open scan keeps its stock")
+    bankVisible = true
+    event("BANKFRAME_OPENED")
+    unavailable = 6
+    runTimer()
+    assert(not record.bank.stale, "An old timer cannot scan a reopened bank")
+    unavailable = nil
+    runTimer()
+
+    containers[0][1].stackCount, containers[6] = 9, {{itemID = 2592, stackCount = 1}}
+    event("PLAYERBANKSLOTS_CHANGED")
+    event("BAG_UPDATE_DELAYED")
+    assert(#callbacks == 1, "Related inventory events share one bank rescan")
+    bankVisible = false
+    event("BANKFRAME_CLOSED")
+    runTimer()
+    local bank = findSource(player.guid, "bank")
+    local plan = addon.BuildRecipePlan({item(2589, 1)})
+    assert(bank.stale and bank.count == 2 and bank.updatedAt == 1000 and plan.craftNow == 9
+        and plan.craftWithKnownStock == 9 and plan.stockUnknown,
+        "A withdrawal followed by a quick close cannot count the old bank stack a second time")
+
+    containers[6], bankVisible, infoLoading = {{itemID = 2589, stackCount = 5}}, true, true
+    event("BANKFRAME_OPENED")
+    runTimer()
+    assert(record.bank.stale and record.bank.items[2589] == 2, "Loading slot data retains the last observation")
+    event("GET_ITEM_INFO_RECEIVED", 2592, true)
+    event("ITEM_DATA_LOAD_RESULT", 2589, false)
+    assert(#callbacks == 0, "Unrelated and failed metadata events do not rescan a bank")
+    infoLoading, clock = false, 1050
+    event("ITEM_DATA_LOAD_RESULT", 2589, true)
+    event("GET_ITEM_INFO_RECEIVED", 2589, true)
+    assert(#callbacks == 1, "Two successful notifications for the missing item share one retry")
+    runTimer()
+    bank = findSource(player.guid, "bank")
+    assert(bank.live and not bank.stale and bank.count == 5 and bank.updatedAt == 1050
+        and addon.BuildRecipePlan({item(2589, 1)}).craftWithKnownStock == 14,
+        "Ready item data restores trusted bank stock without a bag event or bank reopen")
+    bankVisible = false
+    event("BANKFRAME_CLOSED")
+
+    CraftGlanceDB, C_Timer = originalDB, originalTimer
+    containers[0][1].stackCount, containers[6], clock = 7, originalBank, 1000
+end
+
+-- The same deposit can produce a successful bank scan and a failed bags scan.
+do
+    local originalDB, originalGUID, originalBank = CraftGlanceDB, player.guid, containers[6]
+    CraftGlanceDB = nil
+    loadModules()
+    bankVisible = true
+    event("BANKFRAME_OPENED")
+    local record = CraftGlanceDB.characters[originalGUID]
+    assert(record.bags.items[2589] == 7 and record.bank.items[2589] == 2)
+
+    clock, containers[6] = 1050, {{itemID = 2589, stackCount = 9}}
+    containers[0][1].stackCount, unavailable = 0, 0
+    event("BAG_UPDATE_DELAYED")
+    local bags = findSource(originalGUID, "bags")
+    assert(record.bags.stale and bags.live and not bags.stale and bags.count == 0
+        and record.bank.items[2589] == 9 and not record.bank.stale,
+        "After the deposit, live bag stock remains usable and the new bank count is verified")
+    bankVisible = false
+    event("BANKFRAME_CLOSED")
+
+    player.guid, unavailable = "Player-B", nil
+    loadModules()
+    bankVisible, containers[6] = true, {{itemID = 2592, stackCount = 1}}
+    event("BANKFRAME_OPENED")
+    bankVisible = false
+    event("BANKFRAME_CLOSED")
+    bags = findSource(originalGUID, "bags")
+    local bank = findSource(originalGUID, "bank")
+    local plan = addon.BuildRecipePlan({item(2589, 1)})
+    assert(bags.stale and bags.scanned and not bags.live and bags.count == 7 and bags.updatedAt == 1000
+        and bank.count == 9 and bank.updatedAt == 1050 and not bank.stale and plan.craftNow == 0
+        and plan.stockUnknown and plan.craftWithKnownStock == 9,
+        "A zero-stock alt counts the nine deposited items once and can see the stale seven-bag observation")
+    player.guid = originalGUID
+    loadModules()
+    assert(not record.bags.stale and record.bags.items[2589] == 0, "A successful bags scan restores current stock")
+
+    CraftGlanceDB = originalDB
+    containers[0][1].stackCount, containers[6], clock = 7, originalBank, 1000
+end
 loadModules()
 assert(addon.GetBagCount(2589) == 7)
 assert(flags[1] == false and flags[2] == false and flags[3] == false and flags[4] == false, "Bag counts exclude all banks")
@@ -111,6 +230,7 @@ assert(saved.bank.items[2589] == 2 and saved.bank.updatedAt == 1000, "Closing a 
 bankVisible = true
 event("BANKFRAME_OPENED")
 assert(saved.bank.items[2589] == 2 and saved.bank.updatedAt == 1000, "Zero-capacity async bank tabs retain the prior snapshot")
+expectStaleBank()
 containers[6], infoLoading = {{itemID = 2589, stackCount = 8}}, true
 event("PLAYERBANKSLOTS_CHANGED")
 assert(saved.bank.items[2589] == 2 and saved.bank.updatedAt == 1000,
@@ -123,10 +243,31 @@ purchased = {6}
 bankVisible, unavailable = true, 6
 event("BANKFRAME_OPENED")
 assert(saved.bank.items[2589] == 2 and saved.bank.updatedAt == 1000, "Partial scans retain a complete previous snapshot")
+expectStaleBank()
 unavailable = nil
 event("BANKFRAME_CLOSED")
+bankVisible = false
+loadModules()
+expectStaleBank()
+containers[6], bankVisible = {{itemID = 2589, stackCount = 8}}, true
+event("BANKFRAME_OPENED")
+local recovered = findSource(player.guid, "bank")
+assert(recovered.scanned and recovered.count == 8 and not recovered.stale and recovered.live and recovered.updatedAt == 1100,
+    "A successful re-scan clears stale state and replaces the observation age")
+local recoveredPlan = addon.BuildRecipePlan({item(2589, 1)})
+assert(recoveredPlan.ingredients[1].knownTotal == 15 and recoveredPlan.craftWithKnownStock == 15
+    and not recoveredPlan.stockUnknown, "Fresh bank stock becomes trusted again")
+containers[6] = {{itemID = 2589, stackCount = 2}}
+event("PLAYERBANKSLOTS_CHANGED")
+bankVisible = false
+event("BANKFRAME_CLOSED")
+containers[6] = {{itemID = 2589, stackCount = 8}}
 character("Player-B", "Bea", 1, 2)
 character("Player-C", "PvPAlt", 100, 100, "PvP")
+character("Player-E", "EmptyAlt", 0, 0)
+local emptyBags, emptyBank = findSource("Player-E", "bags"), findSource("Player-E", "bank")
+assert(emptyBags.scanned and emptyBags.count == 0 and emptyBank.scanned and emptyBank.count == 0,
+    "A fully scanned zero-stock alt retains explicit 0 / 0 source rows")
 local plan = addon.BuildRecipePlan({item(2589, 4), item(2589, 3)})
 assert(plan.craftNow == 1 and plan.ingredients[1].required == 7)
 assert(plan.ingredients[1].missingOne == 0 and plan.ingredients[1].knownTotal == 12)
@@ -141,9 +282,83 @@ local choicePlan = addon.BuildRecipePlan({choices})
 assert(choicePlan.incomplete and choicePlan.craftNow == nil and choicePlan.craftWithKnownStock == nil
     and choicePlan.message and choicePlan.stockUnknown)
 C_CurrencyInfo = {GetCurrencyInfo = function() return {name = "Token", quantity = 100} end}
-local currencyPlan = addon.BuildRecipePlan({{required = true, quantityRequired = 3, reagents = {{currencyID = 10}}}})
-assert(currencyPlan.incomplete and currencyPlan.craftNow == nil and currencyPlan.craftWithKnownStock == nil,
-    "Currency requirements do not imply an item-inventory craft count")
+local currencySlot = {required = true, quantityRequired = 3, reagents = {{currencyID = 10}}}
+local currencyPlan = addon.BuildRecipePlan({currencySlot})
+assert(not currencyPlan.incomplete and currencyPlan.craftNow == 33 and currencyPlan.craftWithKnownStock == 33
+    and currencyPlan.ingredients[1].knownTotal == 100 and #currencyPlan.ingredients[1].sources == 0
+    and not currencyPlan.stockUnknown, "Currency quantity supports craft counts without doubling it as item stock")
+do
+    local function requiredSlot(reagent, base, overrides)
+        return {required = true, quantityRequired = base, reagents = {reagent}, variableQuantities = overrides}
+    end
+
+    local token = {currencyID = 10}
+    local cloth = {itemID = 2589}
+    local previousCurrency = C_CurrencyInfo
+    C_CurrencyInfo = {GetCurrencyInfo = function() return {name = "Token", quantity = 100, iconFileID = 1234} end}
+
+    local currency = requiredSlot({itemID = 0, currencyID = 10}, 3, {
+        {reagent = {itemID = 0, currencyID = 11}, quantity = 50},
+        {reagent = {itemID = 0, currencyID = 10}, quantity = 25},
+    })
+    local plan = addon.BuildRecipePlan({currency})
+    assert(plan.craftNow == 4 and plan.craftWithKnownStock == 4 and plan.ingredients[1].required == 25,
+        "A currency-specific cost takes precedence over the base quantity")
+    assert(plan.ingredients[1].icon == 1234, "The currency icon is available to the recipe panel")
+
+    local item = requiredSlot({itemID = 2589, currencyID = 0}, 1, {
+        {reagent = {itemID = 2592, currencyID = 0}, quantity = 30},
+        {reagent = {itemID = 2589, currencyID = 0}, quantity = 5},
+    })
+    local second = requiredSlot(cloth, 3, {{reagent = {currencyID = 2589}, quantity = 90}})
+    local function owned(reagent)
+        assert(reagent == item.reagents[1], "The ownership callback retains the original reagent")
+        return 6
+    end
+    local function name(reagent)
+        assert(reagent == item.reagents[1], "The name callback retains the original reagent")
+        return "Cloth"
+    end
+    local shortages, incomplete = addon.ReadMaterials({item, second}, owned, name)
+    assert(not incomplete and #shortages == 1 and shortages[1].missing == 2,
+        "Repeated item slots sum their resolved costs and ignore overrides for other reagent types")
+
+    for _, overrides in ipairs({{}, {{reagent = {currencyID = 20}, quantity = 42}}}) do
+        assert(addon.BuildRecipePlan({requiredSlot(token, 3, overrides)}).craftNow == 33,
+            "An empty or unrelated override list retains the base cost")
+    end
+    assert(addon.BuildRecipePlan({requiredSlot(token, 3)}).craftNow == 33,
+        "Older schematics without variableQuantities retain their base cost")
+
+    for _, overrides in ipairs({false, {false}, {{reagent = {}}}, {{reagent = {currencyID = 0}}}, {{reagent = token}},
+        {{reagent = token, quantity = 0}}, {{reagent = token, quantity = 0.5}}, {{reagent = token, quantity = "25"}}}) do
+        local invalid = addon.BuildRecipePlan({requiredSlot(token, 3, overrides)})
+        assert(invalid.incomplete and invalid.craftNow == nil and invalid.craftWithKnownStock == nil,
+            "A malformed override must not produce a craft estimate")
+    end
+    C_CurrencyInfo = previousCurrency
+end
+local function expectCurrencyIncomplete()
+    local invalid = addon.BuildRecipePlan({currencySlot})
+    assert(invalid.incomplete and invalid.craftNow == nil and invalid.craftWithKnownStock == nil
+        and invalid.stockUnknown, "Missing or invalid currency quantity remains incomplete")
+end
+for _, quantity in ipairs({-1, math.huge, 0 / 0, "100"}) do
+    C_CurrencyInfo.GetCurrencyInfo = function() return {name = "Token", quantity = quantity} end
+    expectCurrencyIncomplete()
+end
+C_CurrencyInfo.GetCurrencyInfo = function() return {name = "Token"} end
+expectCurrencyIncomplete()
+C_CurrencyInfo.GetCurrencyInfo = function() return nil end
+expectCurrencyIncomplete()
+C_CurrencyInfo = {}
+expectCurrencyIncomplete()
+C_CurrencyInfo = nil
+expectCurrencyIncomplete()
+C_CurrencyInfo = {GetCurrencyInfo = function() return {name = "Token", quantity = 0} end}
+currencyPlan = addon.BuildRecipePlan({currencySlot})
+assert(not currencyPlan.incomplete and currencyPlan.craftNow == 0 and currencyPlan.craftWithKnownStock == 0,
+    "A known zero currency balance is complete rather than unknown")
 local shortages = addon.ReadMaterials({item(2589, 4), item(2589, 3)}, function() return 5 end, function() return "Linen Cloth" end)
 assert(shortages[1].missing == 2, "Existing repeated-ingredient behavior stays intact")
 local originalSources = addon.GetSources
@@ -173,13 +388,20 @@ plan = addon.BuildRecipePlan({item(2589, 5)})
 assert(plan.craftNow == 0 and plan.ingredients[1].missingOne == 3)
 assert(plan.ingredients[1].knownTotal == 11 and plan.craftWithKnownStock == 2 and not plan.stockUnknown,
     "A missing-three recipe still displays the full nine-bank stock")
+stockSources[2].stale = true
+plan = addon.BuildRecipePlan({item(2589, 5)})
+assert(plan.ingredients[1].knownTotal == 2 and plan.craftWithKnownStock == 0 and plan.stockUnknown
+    and plan.ingredients[1].sources[2].count == 9,
+    "Stale stock keeps its visible full holding but is excluded from known-stock planning")
+stockSources[2].stale = false
+assert(addon.BuildRecipePlan({item(2589, 5)}).craftWithKnownStock == 2, "Clearing stale status restores the trusted stock count")
 addon.GetSources = originalSources
 plan = addon.BuildRecipePlan({item(2589, 1), item(2592, 2)})
 assert(plan.craftNow == 1 and plan.craftWithKnownStock == 1, "The scarcest ingredient limits craft counts")
 containers[0][1].stackCount = 7
 loadModules()
 assert(CraftGlanceDB.characters[player.guid].bank.items[2589] == 2, "Reload does not erase a bank snapshot")
-assert(addon.GetScanSummary().characterCount == 2)
+assert(addon.GetScanSummary().characterCount == 3)
 local originalGUID, originalName = player.guid, player.name
 player.guid, player.name = "Player-D", "Dee"
 purchased = {}
@@ -228,4 +450,125 @@ assert(inventory[1251] == 40 and inventory[9001] == 1 and inventory[2589] == bef
     "Display filtering never deletes saved inventory observations")
 assert(addon.BuildRecipePlan({item(2589, 1)}).craftNow == 7,
     "The materials-list filter leaves selected-recipe bag counts unchanged")
+
+-- Identity migration must preserve the same character's saved bank when realm IDs arrive late.
+local originalDB = CraftGlanceDB
+local identityPlayer = {guid = player.guid, name = player.name, realm = player.realm,
+    faction = player.faction, realmID = player.realmID}
+CraftGlanceDB = {inventoryVersion = 1, characters = {}}
+player.guid, player.name, player.realm, player.realmID = "Identity-Main", "Identity", "Normal", nil
+bankVisible = false
+loadModules()
+local identity = CraftGlanceDB.characters[player.guid]
+local stableScope = identity.ruleset
+assert(stableScope == "realm-v2:3:normal", "Use a region and normalized realm name even before a realm ID is available")
+identity.bank = {scanned = true, state = "scanned", updatedAt = 900, items = {[2589] = 4}, containers = {}}
+player.realmID = 1
+loadModules()
+assert(CraftGlanceDB.characters[player.guid] == identity and identity.ruleset == stableScope
+    and identity.realmID == 1 and identity.bank.items[2589] == 4,
+    "A newly available realm ID keeps the same character, scope and saved bank")
+player.realmID, player.realm = nil, " N O R M A L "
+loadModules()
+assert(identity.ruleset == stableScope and identity.realmID == 1 and identity.bank.items[2589] == 4,
+    "A later unavailable realm ID retains known identity across normalized realm spelling")
+local identityCount = 0
+for _ in pairs(CraftGlanceDB.characters) do identityCount = identityCount + 1 end
+assert(identityCount == 1, "Realm API availability cannot duplicate the same GUID")
+
+character("Legacy-Numeric", "Numeric", 3, 2)
+character("Legacy-Name", "Named", 5, 1)
+CraftGlanceDB.characters["Legacy-Name"].ruleset = "3:Normal"
+character("Conflicting-Numeric", "Conflict", 100, 100)
+CraftGlanceDB.characters["Conflicting-Numeric"].realmID = 2
+character("Other-ID", "OtherID", 100, 100)
+local otherID = CraftGlanceDB.characters["Other-ID"]
+otherID.ruleset, otherID.region, otherID.realmID = stableScope, 3, 2
+character("Other-Region", "Region", 100, 100)
+local otherRegion = CraftGlanceDB.characters["Other-Region"]
+otherRegion.ruleset, otherRegion.region, otherRegion.realmID = "realm-v2:4:normal", 4, 1
+character("Other-Faction", "Faction", 100, 100)
+CraftGlanceDB.characters["Other-Faction"].faction = "Horde"
+character("Other-Realm", "Realm", 100, 100, "PvP")
+character("Custom-Scope", "Custom", 100, 100)
+CraftGlanceDB.characters["Custom-Scope"].ruleset = "custom-scope"
+loadModules()
+assert(CraftGlanceDB.inventoryVersion == 2
+    and CraftGlanceDB.characters["Legacy-Numeric"].ruleset == stableScope
+    and CraftGlanceDB.characters["Legacy-Name"].ruleset == stableScope,
+    "Recognized numeric and realm-name legacy keys migrate to the stable scope")
+assert(CraftGlanceDB.characters["Conflicting-Numeric"].ruleset == "3:1"
+    and CraftGlanceDB.characters["Custom-Scope"].ruleset == "custom-scope",
+    "Conflicting metadata and custom scopes are not silently merged")
+assert(addon.GetScanSummary().characterCount == 3,
+    "Different region, realm, faction and explicit realm IDs remain isolated after migration")
+plan = addon.BuildRecipePlan({item(2589, 1)})
+assert(plan.ingredients[1].knownTotal == 22 and plan.craftWithKnownStock == 22 and not plan.stockUnknown,
+    "Only the migrated same-scope characters contribute stock")
+
+-- Forever can return zero/empty realm APIs for every recorded character.
+CraftGlanceDB = {inventoryVersion = 1, characters = {}}
+local foreverMain, foreverStock, foreverEmpty = "Player-6948-00000001", "Player-6948-00000002", "Player-6948-00000003"
+local function foreverCharacter(guid, name, bagCount, bankCount)
+    CraftGlanceDB.characters[guid] = {
+        guid = guid, name = name, realm = "", realmID = 0, region = 3, ruleset = "3:0", faction = "Alliance",
+        bags = {scanned = true, updatedAt = 900, items = {[2589] = bagCount}},
+        bank = {scanned = bankCount ~= nil, updatedAt = bankCount ~= nil and 800 or nil,
+            items = bankCount ~= nil and {[2589] = bankCount} or {}},
+    }
+end
+foreverCharacter(foreverMain, "ForeverMain", 4, 0)
+foreverCharacter(foreverStock, "ForeverStock", 9, nil)
+-- 0.5.0 saved '<region>:' when both GetRealmID and the realm name were unavailable.
+CraftGlanceDB.characters[foreverStock].ruleset, CraftGlanceDB.characters[foreverStock].realmID = "3:", nil
+foreverCharacter(foreverEmpty, "ForeverEmpty", 0, 0)
+player.guid, player.name, player.realm, player.realmID = foreverMain, "ForeverMain", "", 0
+normalizedRealm = ""
+containers[0][1].stackCount = 4
+loadModules()
+local foreverScope = "realm-guid-v1:3:6948"
+local function expectForeverRoster()
+    assert(addon.GetScanSummary().characterCount == 3, "Blank Forever realm metadata preserves all three same-realm characters")
+    for _, guid in ipairs({foreverMain, foreverStock, foreverEmpty}) do
+        assert(CraftGlanceDB.characters[guid].ruleset == foreverScope, "Real player GUIDs supply stable realm identity")
+    end
+    local emptyBag, emptyBank = findSource(foreverEmpty, "bags"), findSource(foreverEmpty, "bank")
+    assert(emptyBag.scanned and emptyBag.count == 0 and emptyBank.scanned and emptyBank.count == 0,
+        "A migrated Forever zero-stock alt retains its explicit 0 / 0 rows")
+    local retained = addon.BuildRecipePlan({item(2589, 1)})
+    assert(retained.craftNow == 4 and retained.ingredients[1].knownTotal == 13
+        and retained.craftWithKnownStock == 13 and retained.stockUnknown,
+        "Realm migration retains four live bags plus nine recorded alt items without trusting its unscanned bank")
+    assert(findSource(foreverStock, "bags").updatedAt == 900
+        and findSource(foreverMain, "bank").updatedAt == 800, "Scope migration preserves saved inventory ages")
+end
+expectForeverRoster()
+foreverCharacter("Player-6949-00000004", "OtherGuidRealm", 100, 100)
+foreverCharacter("Player-6948-00000005", "OtherGuidRegion", 100, 100)
+CraftGlanceDB.characters["Player-6948-00000005"].region = 4
+CraftGlanceDB.characters["Player-6948-00000005"].ruleset = "4:0"
+foreverCharacter("Player-6948-00000006", "OtherGuidFaction", 100, 100)
+CraftGlanceDB.characters["Player-6948-00000006"].faction = "Horde"
+CraftGlanceDB.characters[foreverMain].ruleset = "unverified:" .. foreverMain
+loadModules()
+expectForeverRoster()
+assert(CraftGlanceDB.characters["Player-6949-00000004"].ruleset == "realm-guid-v1:3:6949",
+    "The same legacy 3:0 key cannot merge a different GUID realm component")
+player.realmID, player.realm, normalizedRealm = nil, nil, nil
+loadModules()
+expectForeverRoster()
+player.realmID, player.realm, normalizedRealm = 777, "Forever Realm", "ForeverRealm"
+loadModules()
+expectForeverRoster()
+player.realmID, player.realm, normalizedRealm = 0, "", ""
+loadModules()
+expectForeverRoster()
+local foreverRecords = 0
+for _ in pairs(CraftGlanceDB.characters) do foreverRecords = foreverRecords + 1 end
+assert(foreverRecords == 6, "Realm API changes do not duplicate any saved GUID")
+
+CraftGlanceDB = originalDB
+for key, value in pairs(identityPlayer) do player[key] = value end
+normalizedRealm = nil
+containers[0][1].stackCount = 7
 print("CraftGlance inventory persistence and recipe planning passed")
