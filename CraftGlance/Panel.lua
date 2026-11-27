@@ -7,9 +7,11 @@ local tableHeader, needHeader
 local view, collapsed = "recipe", false
 local queued, lastRecipe, baseExtra, reservedExtra
 local refreshErrorLogged = false
-local rows = {}
+local rows, ownerLines = {}, {}
+local layoutEntries
 local width, compactWidth, dockGap = 400, 200, 55
 local rowWidth = width - 44
+local ownerHeight, ownerInset = 24, 4
 local maxPanelHeight = 560
 local borderCollapsed = false
 local colors = {
@@ -108,52 +110,61 @@ local function sourceDetail(label, source)
         (source and source.scanned and (" (" .. (source.live and "live" or age(source.updatedAt)) .. ")") or "")
 end
 
-local function renderOwners(row, sources, required)
-    local holdings = owners(sources)
-    for index, owner in ipairs(holdings) do
-        local line = row.stockRows[index]
-        if not line then
-            line = CreateFrame("Frame", nil, row)
-            line.divider = line:CreateTexture(nil, "BORDER")
-            line.divider:SetHeight(1)
-            line.divider:SetPoint("TOPLEFT", 0, 0)
-            line.divider:SetPoint("TOPRIGHT", 0, 0)
-            line.divider:SetColorTexture(0.39, 0.30, 0.17, 0.8)
-            line.owner = singleLine(text(line, "GameFontHighlight", 0, -3, "", 64))
-            line.bags = singleLine(text(line, "GameFontHighlight", 68, -3, "", 40))
-            line.bank = singleLine(text(line, "GameFontHighlightSmall", 112, -3, "", 64))
-            line.bags:SetJustifyH("CENTER"); line.bank:SetJustifyH("CENTER")
-            line:EnableMouse(true); line:EnableMouseWheel(true)
-            line:SetScript("OnMouseWheel", scrollMaterials)
-            line:SetScript("OnEnter", function(self)
-                if not GameTooltip then return end
-                local holding = self.holding
-                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                GameTooltip:SetText(holding.isCurrent and ("You - " .. holding.fullName) or holding.fullName)
-                GameTooltip:AddLine(sourceDetail("Bags", holding.bags), 0.9, 0.9, 0.9, true)
-                GameTooltip:AddLine(sourceDetail("Bank", holding.bank), 0.9, 0.9, 0.9, true)
-                GameTooltip:Show()
-            end)
-            line:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
-            row.stockRows[index] = line
-        end
-        line.holding = owner
-        line:ClearAllPoints(); line:SetPoint("TOPLEFT", 180, -4 - (index - 1) * 24)
-        line:SetSize(rowWidth - 180, 24)
-        line.divider:SetShown(index > 1)
-        line.owner:SetText(owner.name)
-        line.bags:SetText(countText(owner.bags)); line.bank:SetText(countText(owner.bank))
-        tint(line.owner, colors.text)
-        tint(line.bags, owner.bags and (not owner.bags.scanned or owner.bags.stale) and colors.muted or colors.text)
-        tint(line.bank, owner.bank and (not owner.bank.scanned or owner.bank.stale) and colors.muted or colors.text)
-        if owner.isCurrent and required and owner.bags and owner.bags.scanned then
-            tint(line.bags, owner.bags.count >= required and colors.good or colors.short)
-        end
-        if owner.bank and owner.bank.scanned and not owner.bank.stale and (owner.bank.count or 0) > 0 then tint(line.bank, colors.bank) end
-        line:Show()
+local function hideOwnedTooltip(frame)
+    if GameTooltip and GameTooltip:IsOwned(frame) then GameTooltip:Hide() end
+end
+
+local function updateOwnedTooltip(frame)
+    if GameTooltip and GameTooltip:IsShown() and GameTooltip:IsOwned(frame) then
+        frame:GetScript("OnEnter")(frame)
     end
-    for index = #holdings + 1, #row.stockRows do row.stockRows[index]:Hide() end
-    return math.max(1, #holdings) * 24 + 8
+end
+
+local function placeOwner(row, owner, index, poolIndex, required)
+    local line = ownerLines[poolIndex]
+    if not line then
+        line = CreateFrame("Frame", nil, row)
+        line.divider = line:CreateTexture(nil, "BORDER")
+        line.divider:SetHeight(1)
+        line.divider:SetPoint("TOPLEFT", 0, 0)
+        line.divider:SetPoint("TOPRIGHT", 0, 0)
+        line.divider:SetColorTexture(0.39, 0.30, 0.17, 0.8)
+        line.owner = singleLine(text(line, "GameFontHighlight", 0, -3, "", 64))
+        line.bags = singleLine(text(line, "GameFontHighlight", 68, -3, "", 40))
+        line.bank = singleLine(text(line, "GameFontHighlightSmall", 112, -3, "", 64))
+        line.bags:SetJustifyH("CENTER"); line.bank:SetJustifyH("CENTER")
+        line:EnableMouse(true); line:EnableMouseWheel(true)
+        line:SetScript("OnMouseWheel", scrollMaterials)
+        line:SetScript("OnEnter", function(self)
+            if not GameTooltip then return end
+            local holding = self.holding
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText(holding.isCurrent and ("You - " .. holding.fullName) or holding.fullName)
+            GameTooltip:AddLine(sourceDetail("Bags", holding.bags), 0.9, 0.9, 0.9, true)
+            GameTooltip:AddLine(sourceDetail("Bank", holding.bank), 0.9, 0.9, 0.9, true)
+            GameTooltip:Show()
+        end)
+        line:SetScript("OnLeave", hideOwnedTooltip)
+        line:SetScript("OnHide", hideOwnedTooltip)
+        ownerLines[poolIndex] = line
+    elseif line:GetParent() ~= row then
+        line:SetParent(row)
+    end
+    line.holding = owner
+    line:ClearAllPoints(); line:SetPoint("TOPLEFT", 180, -ownerInset - (index - 1) * ownerHeight)
+    line:SetSize(rowWidth - 180, ownerHeight)
+    line.divider:SetShown(index > 1)
+    line.owner:SetText(owner.name)
+    line.bags:SetText(countText(owner.bags)); line.bank:SetText(countText(owner.bank))
+    tint(line.owner, colors.text)
+    tint(line.bags, owner.bags and (not owner.bags.scanned or owner.bags.stale) and colors.muted or colors.text)
+    tint(line.bank, owner.bank and (not owner.bank.scanned or owner.bank.stale) and colors.muted or colors.text)
+    if owner.isCurrent and required and owner.bags and owner.bags.scanned then
+        tint(line.bags, owner.bags.count >= required and colors.good or colors.short)
+    end
+    if owner.bank and owner.bank.scanned and not owner.bank.stale and (owner.bank.count or 0) > 0 then tint(line.bank, colors.bank) end
+    line:Show()
+    updateOwnedTooltip(line)
 end
 
 local function fitBackground()
@@ -176,78 +187,142 @@ local function fitBackground()
     end
 end
 
+local function getRow(index)
+    local row = rows[index]
+    if row then return row end
+    row = CreateFrame("Frame", nil, body)
+    row.background = background(row, 0, 0, 0, 0)
+    row.cardTop = row:CreateTexture(nil, "BORDER")
+    row.cardTop:SetHeight(1)
+    row.cardTop:SetPoint("TOPLEFT", 0, 0)
+    row.cardTop:SetPoint("TOPRIGHT", 0, 0)
+    row.cardTop:SetColorTexture(0.57, 0.43, 0.24, 0.8)
+    row.cardBottom = row:CreateTexture(nil, "BORDER")
+    row.cardBottom:SetHeight(1)
+    row.cardBottom:SetPoint("BOTTOMLEFT", 0, 0)
+    row.cardBottom:SetPoint("BOTTOMRIGHT", 0, 0)
+    row.cardBottom:SetColorTexture(0.57, 0.43, 0.24, 0.8)
+    row.icon = row:CreateTexture(nil, "ARTWORK")
+    row.icon:SetSize(20, 20); row.icon:SetPoint("TOPLEFT", 4, -4)
+    row.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+    row.title = singleLine(text(row, "GameFontNormal", 30, -7, "", 110))
+    row.requirement = singleLine(text(row, "GameFontHighlight", 145, -7, "", 28))
+    row.requirement:SetJustifyH("CENTER")
+    row.note = singleLine(text(row, "GameFontHighlightSmall", 30, -28, "", 144))
+    row.detail = text(row, "GameFontHighlight", 12, -40, "", rowWidth - 24)
+    row:EnableMouse(true)
+    row:EnableMouseWheel(true)
+    row:SetScript("OnMouseWheel", scrollMaterials)
+    row:SetScript("OnEnter", function(self)
+        if not GameTooltip then return end
+        if not (self.itemID or (self.currencyID and GameTooltip.SetCurrencyByID)) then
+            hideOwnedTooltip(self)
+            return
+        end
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        if self.itemID then GameTooltip:SetItemByID(self.itemID) else GameTooltip:SetCurrencyByID(self.currencyID) end
+        if self.required then GameTooltip:AddLine("Per craft: " .. self.required, 0.9, 0.9, 0.9) end
+        if self.missingOne and self.missingOne > 0 then
+            GameTooltip:AddLine("Missing to craft: " .. self.missingOne, 1, 0.57, 0.42)
+        end
+        GameTooltip:Show()
+    end)
+    row:SetScript("OnLeave", hideOwnedTooltip)
+    row:SetScript("OnHide", hideOwnedTooltip)
+    rows[index] = row
+    return row
+end
+
+local function setMessage(row, entry)
+    row.title:SetWidth(rowWidth - 8)
+    row.title:SetWordWrap(true); row.title:SetText(entry.title)
+    row.detail:ClearAllPoints(); row.detail:SetPoint("TOPLEFT", row.title, "BOTTOMLEFT", 0, -10)
+    row.detail:SetWidth(rowWidth - 24)
+    row.detail:SetText(entry.detail or ""); tint(row.detail, colors.text)
+end
+
+local function placeRow(row, entry)
+    row:ClearAllPoints(); row:SetPoint("TOPLEFT", body, "TOPLEFT", 0, -entry.top)
+    row:SetSize(rowWidth, entry.height)
+    row.itemID, row.currencyID = entry.itemID, entry.currencyID
+    row.required, row.missingOne = entry.required, entry.missingOne
+    local material = entry.kind == "material"
+    row.icon:SetShown(material)
+    row.cardTop:SetShown(material); row.cardBottom:SetShown(material)
+    row.requirement:SetShown(material and entry.required ~= nil)
+    row.title:ClearAllPoints(); row.title:SetPoint("TOPLEFT", material and 30 or 4, material and -7 or -8)
+    row.detail:SetShown(not material or entry.currencyID ~= nil); row.note:Hide()
+    if material then
+        row.title:SetWidth(entry.required and 110 or 144)
+        row.title:SetWordWrap(false); row.title:SetText(entry.title)
+        row.icon:SetTexture(entry.icon or itemIcon(entry.itemID))
+        row.requirement:SetText(entry.required and tostring(entry.required) or "")
+        tint(row.requirement, colors.text)
+        if entry.currencyID then
+            row.detail:ClearAllPoints(); row.detail:SetPoint("TOPLEFT", 180, -7)
+            row.detail:SetWidth(rowWidth - 180)
+            row.detail:SetText("Owned: " .. (entry.bags ~= nil and tostring(entry.bags) or "unknown"))
+            tint(row.detail, entry.bags ~= nil and colors.text or colors.muted)
+        end
+        if entry.missingOne and entry.missingOne > 0 then
+            row.note:SetText("Missing: " .. entry.missingOne)
+            tint(row.note, colors.short); row.note:Show()
+        end
+    else
+        setMessage(row, entry)
+    end
+    row:Show()
+    updateOwnedTooltip(row)
+end
+
+-- Keep one pool for cards and one for owner lines, including very tall single-material cards.
+local function renderViewport()
+    if not layoutEntries or not scroll:IsVisible() then return end
+    local top = scroll:GetVerticalScroll()
+    local bottom = top + scroll:GetHeight()
+    local first, last = 1, #layoutEntries
+    while first <= last do
+        local mid = math.floor((first + last) / 2)
+        local entry = layoutEntries[mid]
+        if entry.top + entry.height <= top then first = mid + 1 else last = mid - 1 end
+    end
+    local cardCount, ownerCount = 0, 0
+    for i = first, #layoutEntries do
+        local entry = layoutEntries[i]
+        if entry.top >= bottom then break end
+        cardCount = cardCount + 1
+        local row = getRow(cardCount)
+        placeRow(row, entry)
+        if entry.holdings then
+            local ownerTop = entry.top + ownerInset
+            local firstOwner = math.max(1, math.floor((top - ownerTop) / ownerHeight) + 1)
+            local lastOwner = math.min(#entry.holdings, math.ceil((bottom - ownerTop) / ownerHeight))
+            for index = firstOwner, lastOwner do
+                ownerCount = ownerCount + 1
+                placeOwner(row, entry.holdings[index], index, ownerCount, entry.required)
+            end
+        end
+    end
+    for i = ownerCount + 1, #ownerLines do ownerLines[i]:Hide() end
+    for i = cardCount + 1, #rows do rows[i]:Hide() end
+end
+
 local function renderRows(entries)
     local top, hasMaterials = 0, false
-    for index, entry in ipairs(entries) do
-        local row = rows[index]
-        if not row then
-            row = CreateFrame("Frame", nil, body)
-            row.background = background(row, 0, 0, 0, 0)
-            row.cardTop = row:CreateTexture(nil, "BORDER")
-            row.cardTop:SetHeight(1)
-            row.cardTop:SetPoint("TOPLEFT", 0, 0)
-            row.cardTop:SetPoint("TOPRIGHT", 0, 0)
-            row.cardTop:SetColorTexture(0.57, 0.43, 0.24, 0.8)
-            row.cardBottom = row:CreateTexture(nil, "BORDER")
-            row.cardBottom:SetHeight(1)
-            row.cardBottom:SetPoint("BOTTOMLEFT", 0, 0)
-            row.cardBottom:SetPoint("BOTTOMRIGHT", 0, 0)
-            row.cardBottom:SetColorTexture(0.57, 0.43, 0.24, 0.8)
-            row.icon = row:CreateTexture(nil, "ARTWORK")
-            row.icon:SetSize(20, 20); row.icon:SetPoint("TOPLEFT", 4, -4)
-            row.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
-            row.title = singleLine(text(row, "GameFontNormal", 30, -7, "", 110))
-            row.requirement = singleLine(text(row, "GameFontHighlight", 145, -7, "", 28))
-            row.requirement:SetJustifyH("CENTER")
-            row.note = singleLine(text(row, "GameFontHighlightSmall", 30, -28, "", 144))
-            row.detail = text(row, "GameFontHighlight", 12, -40, "", rowWidth - 24)
-            row.stockRows = {}
-            row:EnableMouse(true)
-            row:EnableMouseWheel(true)
-            row:SetScript("OnMouseWheel", scrollMaterials)
-            row:SetScript("OnEnter", function(self)
-                if not GameTooltip or not self.itemID then return end
-                GameTooltip:SetOwner(self, "ANCHOR_RIGHT"); GameTooltip:SetItemByID(self.itemID)
-                if self.required then GameTooltip:AddLine("Per craft: " .. self.required, 0.9, 0.9, 0.9) end
-                if self.missingOne and self.missingOne > 0 then
-                    GameTooltip:AddLine("Missing to craft: " .. self.missingOne, 1, 0.57, 0.42)
-                end
-                GameTooltip:Show()
-            end)
-            row:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
-            rows[index] = row
-        end
-        row:ClearAllPoints(); row:SetPoint("TOPLEFT", body, "TOPLEFT", 0, -top)
-        row:SetWidth(rowWidth); row.itemID, row.required, row.missingOne = entry.itemID, entry.required, entry.missingOne
-        local material = entry.kind == "material"
-        hasMaterials = hasMaterials or material
-        row.icon:SetShown(material)
-        row.cardTop:SetShown(material); row.cardBottom:SetShown(material)
-        row.requirement:SetShown(material and entry.required ~= nil)
-        row.title:ClearAllPoints(); row.title:SetPoint("TOPLEFT", material and 30 or 4, material and -7 or -8)
-        row.title:SetWidth(material and (entry.required and 110 or 144) or rowWidth - 8)
-        row.title:SetWordWrap(not material); row.title:SetText(entry.title)
-        row.detail:SetShown(not material); row.note:Hide()
-        local height
-        if material then
-            row.icon:SetTexture(itemIcon(entry.itemID))
-            row.requirement:SetText(entry.required and tostring(entry.required) or "")
-            tint(row.requirement, colors.text)
-            height = renderOwners(row, entry.sources, entry.required)
-            if entry.missingOne and entry.missingOne > 0 then
-                row.note:SetText("Missing: " .. entry.missingOne)
-                tint(row.note, colors.short); row.note:Show()
-                height = math.max(height, 46)
-            end
+    for _, entry in ipairs(entries) do
+        entry.top = top
+        if entry.kind == "material" then
+            hasMaterials = true
+            entry.holdings = owners(entry.sources)
+            entry.height = math.max(1, #entry.holdings) * ownerHeight + 2 * ownerInset
+            if entry.missingOne and entry.missingOne > 0 then entry.height = math.max(entry.height, 46) end
         else
-            for _, line in ipairs(row.stockRows) do line:Hide() end
-            row.detail:ClearAllPoints(); row.detail:SetPoint("TOPLEFT", row.title, "BOTTOMLEFT", 0, -10)
-            row.detail:SetText(entry.detail or ""); tint(row.detail, colors.text)
-            height = row.title:GetStringHeight() + row.detail:GetStringHeight() + 28
+            local row = getRow(1)
+            setMessage(row, entry)
+            entry.height = row.title:GetStringHeight() + row.detail:GetStringHeight() + 28
         end
-        row:SetHeight(height); row:Show(); top = top + height + 4
+        top = top + entry.height + 4
     end
-    for index = #entries + 1, #rows do rows[index]:Hide() end
     body:SetHeight(math.max(top, 1))
     -- Fit short lists, then keep the window bounded and scroll longer lists.
     local listTop = view == "recipe" and 190 or 166
@@ -259,6 +334,8 @@ local function renderRows(entries)
     local range = math.max(0, math.floor(scroll:GetVerticalScrollRange()))
     scroll:SetVerticalScroll(math.min(scroll:GetVerticalScroll(), range))
     ScrollFrame_OnScrollRangeChanged(scroll, 0, range)
+    layoutEntries = entries
+    renderViewport()
 end
 
 local function reserveSpace(visible)
@@ -336,6 +413,7 @@ local function setRecipeHeader(name, icon)
 end
 
 local function refreshContents()
+    layoutEntries = nil
     position()
     for _, widget in ipairs({recipeTab, materialsTab, scroll, hero, scanText, tableHeader}) do
         widget:SetShown(not collapsed)
@@ -419,6 +497,7 @@ local function refreshContents()
     for _, ingredient in ipairs(plan.ingredients) do
         hasCurrency = hasCurrency or ingredient.currencyID ~= nil
         entries[#entries + 1] = {kind = "material", title = ingredient.name, itemID = ingredient.itemID,
+            currencyID = ingredient.currencyID, icon = ingredient.icon,
             required = ingredient.required, bags = ingredient.bags, sources = ingredient.sources,
             missingOne = ingredient.missingOne}
     end
@@ -429,6 +508,7 @@ local function refreshContents()
 end
 
 local function refreshFallback()
+    layoutEntries = nil
     -- Avoid inventory/recipe APIs and row rendering while handling their failure.
     for _, row in ipairs(rows) do row:Hide() end
     body:SetHeight(1)
@@ -446,9 +526,9 @@ local function refreshFallback()
     scanText:SetText("Inventory details unavailable.")
 end
 
-local function refresh()
+local function protectedRefresh(callback)
     if not panel or not panel:IsVisible() then return end
-    local ok, err = pcall(refreshContents)
+    local ok, err = pcall(callback)
     if not ok then
         refreshFallback()
         if not refreshErrorLogged then
@@ -456,6 +536,10 @@ local function refresh()
             print("CraftGlance: material refresh failed; select a recipe to retry. " .. tostring(err))
         end
     end
+end
+
+local function refresh()
+    protectedRefresh(refreshContents)
 end
 
 local function schedule()
@@ -527,7 +611,7 @@ local function attach()
         if not GameTooltip then return end
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         GameTooltip:SetText("Craft now uses bags and owned currency")
-        GameTooltip:AddLine("Known stock includes recorded bags and banks. Counts marked * are last observed after a failed scan and excluded from Known stock until rescanned. Required tools, location and cooldowns still apply.", 0.9, 0.9, 0.9, true)
+        GameTooltip:AddLine("Known stock includes recorded bags and banks. Counts marked * need a new scan. Known stock excludes these amounts. Required tools, location and cooldowns still apply.", 0.9, 0.9, 0.9, true)
         GameTooltip:Show()
     end)
     hero:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
@@ -554,7 +638,7 @@ local function attach()
     tableHeader:SetScript("OnEnter", function(self)
         if not GameTooltip then return end
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT"); GameTooltip:SetText("Material stock")
-        GameTooltip:AddLine("Need is the quantity for one craft. Bags and Bank show each character's full holding, including scanned zeros. Not scanned means that inventory is unknown. * means last observed after a failed scan; excluded from Known stock. Hover a character for scan times.", 0.9, 0.9, 0.9, true)
+        GameTooltip:AddLine("Need is the quantity for one craft. Bags and Bank show each character's full holding, including scanned zeros. Not scanned means that inventory is unknown. Counts marked * need a new scan and are excluded from Known stock. Hover a character for scan times.", 0.9, 0.9, 0.9, true)
         GameTooltip:Show()
     end)
     tableHeader:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
@@ -563,6 +647,7 @@ local function attach()
     body = CreateFrame("Frame", nil, scroll); body:SetSize(rowWidth, 1); scroll:SetScrollChild(body)
     scroll:EnableMouseWheel(true)
     scroll:SetScript("OnMouseWheel", scrollMaterials)
+    scroll:HookScript("OnVerticalScroll", function() protectedRefresh(renderViewport) end)
     filter = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
     filter:SetSize(23, 23); filter:SetPoint("BOTTOMLEFT", 10, 31)
     filter.Text:SetText("Craftable only"); filter:SetHitRectInsets(0, -105, 0, 0)
@@ -584,7 +669,7 @@ local function attach()
 end
 
 for _, event in ipairs({"ADDON_LOADED", "TRADE_SKILL_SHOW", "TRADE_SKILL_LIST_UPDATE", "TRADE_SKILL_DATA_SOURCE_CHANGED",
-    "BAG_UPDATE_DELAYED", "GET_ITEM_INFO_RECEIVED", "UI_SCALE_CHANGED", "DISPLAY_SIZE_CHANGED", "PLAYER_ENTERING_WORLD",
+    "BAG_UPDATE_DELAYED", "GET_ITEM_INFO_RECEIVED", "CURRENCY_DISPLAY_UPDATE", "UI_SCALE_CHANGED", "DISPLAY_SIZE_CHANGED", "PLAYER_ENTERING_WORLD",
     "BANKFRAME_OPENED", "BANKFRAME_CLOSED", "SPELL_UPDATE_COOLDOWN", "PLAYER_REGEN_ENABLED"}) do events:RegisterEvent(event) end
 events:SetScript("OnEvent", function(_, event)
     if not panel then attach() end

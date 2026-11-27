@@ -109,6 +109,108 @@ local function expectStaleBank()
         and stalePlan.craftWithKnownStock == 7 and stalePlan.stockUnknown,
         "Retained stale bank stock is displayed but cannot increase trusted craft counts")
 end
+
+-- Keep the real delay between a stock change and the queued bank scan.
+do
+    local callbacks = {}
+    local function runTimer()
+        assert(table.remove(callbacks, 1), "Expected a queued bank scan")()
+    end
+    local originalDB, originalTimer = CraftGlanceDB, C_Timer
+    local originalBank = containers[6]
+    CraftGlanceDB = nil
+    C_Timer = {After = function(_, callback) callbacks[#callbacks + 1] = callback end}
+    loadModules()
+    local record = CraftGlanceDB.characters[player.guid]
+    bankVisible = true
+    event("BANKFRAME_OPENED")
+    bankVisible = false
+    event("BANKFRAME_CLOSED")
+    assert(record.bank.scanned and not record.bank.stale, "Closing after a successful open scan keeps its stock")
+    bankVisible = true
+    event("BANKFRAME_OPENED")
+    unavailable = 6
+    runTimer()
+    assert(not record.bank.stale, "An old timer cannot scan a reopened bank")
+    unavailable = nil
+    runTimer()
+
+    containers[0][1].stackCount, containers[6] = 9, {{itemID = 2592, stackCount = 1}}
+    event("PLAYERBANKSLOTS_CHANGED")
+    event("BAG_UPDATE_DELAYED")
+    assert(#callbacks == 1, "Related inventory events share one bank rescan")
+    bankVisible = false
+    event("BANKFRAME_CLOSED")
+    runTimer()
+    local bank = findSource(player.guid, "bank")
+    local plan = addon.BuildRecipePlan({item(2589, 1)})
+    assert(bank.stale and bank.count == 2 and bank.updatedAt == 1000 and plan.craftNow == 9
+        and plan.craftWithKnownStock == 9 and plan.stockUnknown,
+        "A withdrawal followed by a quick close cannot count the old bank stack a second time")
+
+    containers[6], bankVisible, infoLoading = {{itemID = 2589, stackCount = 5}}, true, true
+    event("BANKFRAME_OPENED")
+    runTimer()
+    assert(record.bank.stale and record.bank.items[2589] == 2, "Loading slot data retains the last observation")
+    event("GET_ITEM_INFO_RECEIVED", 2592, true)
+    event("ITEM_DATA_LOAD_RESULT", 2589, false)
+    assert(#callbacks == 0, "Unrelated and failed metadata events do not rescan a bank")
+    infoLoading, clock = false, 1050
+    event("ITEM_DATA_LOAD_RESULT", 2589, true)
+    event("GET_ITEM_INFO_RECEIVED", 2589, true)
+    assert(#callbacks == 1, "Two successful notifications for the missing item share one retry")
+    runTimer()
+    bank = findSource(player.guid, "bank")
+    assert(bank.live and not bank.stale and bank.count == 5 and bank.updatedAt == 1050
+        and addon.BuildRecipePlan({item(2589, 1)}).craftWithKnownStock == 14,
+        "Ready item data restores trusted bank stock without a bag event or bank reopen")
+    bankVisible = false
+    event("BANKFRAME_CLOSED")
+
+    CraftGlanceDB, C_Timer = originalDB, originalTimer
+    containers[0][1].stackCount, containers[6], clock = 7, originalBank, 1000
+end
+
+-- The same deposit can produce a successful bank scan and a failed bags scan.
+do
+    local originalDB, originalGUID, originalBank = CraftGlanceDB, player.guid, containers[6]
+    CraftGlanceDB = nil
+    loadModules()
+    bankVisible = true
+    event("BANKFRAME_OPENED")
+    local record = CraftGlanceDB.characters[originalGUID]
+    assert(record.bags.items[2589] == 7 and record.bank.items[2589] == 2)
+
+    clock, containers[6] = 1050, {{itemID = 2589, stackCount = 9}}
+    containers[0][1].stackCount, unavailable = 0, 0
+    event("BAG_UPDATE_DELAYED")
+    local bags = findSource(originalGUID, "bags")
+    assert(record.bags.stale and bags.live and not bags.stale and bags.count == 0
+        and record.bank.items[2589] == 9 and not record.bank.stale,
+        "After the deposit, live bag stock remains usable and the new bank count is verified")
+    bankVisible = false
+    event("BANKFRAME_CLOSED")
+
+    player.guid, unavailable = "Player-B", nil
+    loadModules()
+    bankVisible, containers[6] = true, {{itemID = 2592, stackCount = 1}}
+    event("BANKFRAME_OPENED")
+    bankVisible = false
+    event("BANKFRAME_CLOSED")
+    bags = findSource(originalGUID, "bags")
+    local bank = findSource(originalGUID, "bank")
+    local plan = addon.BuildRecipePlan({item(2589, 1)})
+    assert(bags.stale and bags.scanned and not bags.live and bags.count == 7 and bags.updatedAt == 1000
+        and bank.count == 9 and bank.updatedAt == 1050 and not bank.stale and plan.craftNow == 0
+        and plan.stockUnknown and plan.craftWithKnownStock == 9,
+        "A zero-stock alt counts the nine deposited items once and can see the stale seven-bag observation")
+    player.guid = originalGUID
+    loadModules()
+    assert(not record.bags.stale and record.bags.items[2589] == 0, "A successful bags scan restores current stock")
+
+    CraftGlanceDB = originalDB
+    containers[0][1].stackCount, containers[6], clock = 7, originalBank, 1000
+end
 loadModules()
 assert(addon.GetBagCount(2589) == 7)
 assert(flags[1] == false and flags[2] == false and flags[3] == false and flags[4] == false, "Bag counts exclude all banks")
@@ -185,6 +287,57 @@ local currencyPlan = addon.BuildRecipePlan({currencySlot})
 assert(not currencyPlan.incomplete and currencyPlan.craftNow == 33 and currencyPlan.craftWithKnownStock == 33
     and currencyPlan.ingredients[1].knownTotal == 100 and #currencyPlan.ingredients[1].sources == 0
     and not currencyPlan.stockUnknown, "Currency quantity supports craft counts without doubling it as item stock")
+do
+    local function requiredSlot(reagent, base, overrides)
+        return {required = true, quantityRequired = base, reagents = {reagent}, variableQuantities = overrides}
+    end
+
+    local token = {currencyID = 10}
+    local cloth = {itemID = 2589}
+    local previousCurrency = C_CurrencyInfo
+    C_CurrencyInfo = {GetCurrencyInfo = function() return {name = "Token", quantity = 100, iconFileID = 1234} end}
+
+    local currency = requiredSlot({itemID = 0, currencyID = 10}, 3, {
+        {reagent = {itemID = 0, currencyID = 11}, quantity = 50},
+        {reagent = {itemID = 0, currencyID = 10}, quantity = 25},
+    })
+    local plan = addon.BuildRecipePlan({currency})
+    assert(plan.craftNow == 4 and plan.craftWithKnownStock == 4 and plan.ingredients[1].required == 25,
+        "A currency-specific cost takes precedence over the base quantity")
+    assert(plan.ingredients[1].icon == 1234, "The currency icon is available to the recipe panel")
+
+    local item = requiredSlot({itemID = 2589, currencyID = 0}, 1, {
+        {reagent = {itemID = 2592, currencyID = 0}, quantity = 30},
+        {reagent = {itemID = 2589, currencyID = 0}, quantity = 5},
+    })
+    local second = requiredSlot(cloth, 3, {{reagent = {currencyID = 2589}, quantity = 90}})
+    local function owned(reagent)
+        assert(reagent == item.reagents[1], "The ownership callback retains the original reagent")
+        return 6
+    end
+    local function name(reagent)
+        assert(reagent == item.reagents[1], "The name callback retains the original reagent")
+        return "Cloth"
+    end
+    local shortages, incomplete = addon.ReadMaterials({item, second}, owned, name)
+    assert(not incomplete and #shortages == 1 and shortages[1].missing == 2,
+        "Repeated item slots sum their resolved costs and ignore overrides for other reagent types")
+
+    for _, overrides in ipairs({{}, {{reagent = {currencyID = 20}, quantity = 42}}}) do
+        assert(addon.BuildRecipePlan({requiredSlot(token, 3, overrides)}).craftNow == 33,
+            "An empty or unrelated override list retains the base cost")
+    end
+    assert(addon.BuildRecipePlan({requiredSlot(token, 3)}).craftNow == 33,
+        "Older schematics without variableQuantities retain their base cost")
+
+    for _, overrides in ipairs({false, {false}, {{reagent = {}}}, {{reagent = {currencyID = 0}}}, {{reagent = token}},
+        {{reagent = token, quantity = 0}}, {{reagent = token, quantity = 0.5}}, {{reagent = token, quantity = "25"}}}) do
+        local invalid = addon.BuildRecipePlan({requiredSlot(token, 3, overrides)})
+        assert(invalid.incomplete and invalid.craftNow == nil and invalid.craftWithKnownStock == nil,
+            "A malformed override must not produce a craft estimate")
+    end
+    C_CurrencyInfo = previousCurrency
+end
 local function expectCurrencyIncomplete()
     local invalid = addon.BuildRecipePlan({currencySlot})
     assert(invalid.incomplete and invalid.craftNow == nil and invalid.craftWithKnownStock == nil
@@ -366,6 +519,8 @@ local function foreverCharacter(guid, name, bagCount, bankCount)
 end
 foreverCharacter(foreverMain, "ForeverMain", 4, 0)
 foreverCharacter(foreverStock, "ForeverStock", 9, nil)
+-- 0.5.0 saved '<region>:' when both GetRealmID and the realm name were unavailable.
+CraftGlanceDB.characters[foreverStock].ruleset, CraftGlanceDB.characters[foreverStock].realmID = "3:", nil
 foreverCharacter(foreverEmpty, "ForeverEmpty", 0, 0)
 player.guid, player.name, player.realm, player.realmID = foreverMain, "ForeverMain", "", 0
 normalizedRealm = ""

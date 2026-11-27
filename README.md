@@ -8,7 +8,7 @@ Version 0.5.1 is a review candidate on branch `craftglance-0.5.1`. Its manual
 in-game verification, including the user-authorized local installation, is
 tracked in [TESTING.md](TESTING.md). The main branch and published 0.5.0 ZIP
 remain the release baseline.
-The corrected candidate passed same-session reload and both character-switch
+The earlier candidate passed same-session reload and both character-switch
 directions, saved alt-bank checks, deposit/withdrawal counts and compact Cooking
 layout checks. All four test cloth were restored to the main character's bags.
 
@@ -21,8 +21,9 @@ layout checks. All four test cloth were restored to the main character's bags.
 - **This Recipe** opens by default. Native recipe and reagent icons help you
   recognize the selected craft and its ingredients.
 - The prominent **Craft now** count uses items in bags only, including the
-  equipped reagent bag. Currency requirements use the owned quantity reported
-  by the client. **Known stock** is a separate planning count using current
+  equipped reagent bag. Currency rows show your owned balance and update when
+  it changes. **Need** includes any per-reagent cost specified by the recipe.
+  **Known stock** is a separate planning count using current
   bags and eligible recorded bags and character banks in your inventory scope.
   Saved stock can change between observations, and unscanned inventories may
   contain more. Required tools, location and cooldowns still apply.
@@ -42,11 +43,10 @@ layout checks. All four test cloth were restored to the main character's bags.
 - Bags are recorded on login and inventory changes. Character banks are scanned
   only while accessible at a bank. Counts, owner names and observation times
   survive logout and UI reload. Unscanned banks are labelled clearly.
-- A failed bank scan preserves the previous quantity and observation age for
-  display. A muted count with **\*** marks that last observation, and its hover
-  details show the age and rescan status. The current bank footer reads
-  **Your bank: rescan needed**. Stale bank stock is excluded from Known stock
-  until a successful scan verifies its contents again.
+- A muted count with **\*** preserves the last observation after a failed scan
+  or a bank change that still needs verification. Hover for the age and rescan
+  status. Known stock excludes stale banks and stale bags on offline characters.
+  An open bank retries when the item data it was waiting for arrives.
 - **All Materials** searches recorded items the client identifies as
   **Crafting Reagents**, by name or exact item ID. Each matching reagent shows
   its character, bag and bank quantities in the compact shared table, including

@@ -166,6 +166,25 @@ client.
 
 ## 0.5.1 automated checks
 
+The post-review fixes passed the Lua 5.1 regression cases below. The live
+observations above were recorded on the earlier candidate.
+
+- Withdrawing two cloth and closing the bank before its delayed scan leaves
+  nine in bags and nine in Known stock. A delayed callback from that session
+  cannot overwrite a newly opened bank.
+- Depositing seven cloth into a bank holding two while the bag scan fails
+  leaves nine in Known stock after switching to an empty alt. The previous
+  seven stay visible as a stale bag observation.
+- An alt saved under the legacy key `3:` rejoins its roster through its Player
+  GUID. An open bank with a loading item retries on the matching item-data event.
+- A selected three-token recipe updates from 33 crafts to zero when its balance
+  falls from 100 to one. Currency rows show known balances, including zero,
+  and distinguish unavailable balances. A cost override of 25 takes precedence
+  over a base cost of three, giving four crafts from 100 tokens.
+- Scrolling a sparse list of 100 materials and 12 characters reaches all 1,200
+  holdings. The fixture checks that the frame pool stays bounded as the list
+  scrolls and that tooltips and counts follow the reused rows.
+
 Both `tests/materials.lua` and `tests/fixtures.lua` passed on 27 November 2026
 using `lupa.lua51.LuaRuntime`. The runtime's `_VERSION` reported `Lua 5.1`.
 A standalone `lua5.1` executable was unavailable in the review environment.

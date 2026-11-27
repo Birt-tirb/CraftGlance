@@ -75,7 +75,7 @@ local function migrateScope(character)
         kind = region and "name"
     end
     if not region then
-        region, identity = key:match("^(%d+):(.+)$")
+        region, identity = key:match("^(%d+):(.*)$")
         kind = region and "legacy"
     end
     if not region and component and key == "unverified:" .. character.guid then
@@ -94,8 +94,8 @@ local function migrateScope(character)
         legacyID = identityNumber(tonumber(identity))
         if legacyID then
             if tostring(legacyID) ~= identity or (storedID and storedID ~= legacyID) then return end
-        elseif identity == "0" and component then
-            -- Forever can report no realm name and a zero realm ID. Only the
+        elseif (identity == "0" or identity == "") and component then
+            -- Forever can report no realm name and a zero or missing realm ID. Only the
             -- individual Player GUID can disambiguate those old shared keys.
             if storedID then return end
         elseif not normalized or realmName(identity) ~= normalized then
@@ -176,7 +176,8 @@ local function readContainers(ids, names, bank)
             if not ok or not plain(info) then return nil, "unavailable" end
             if info then
                 local itemID, count = info.itemID, info.stackCount
-                if not number(itemID) or itemID == 0 or not number(count) then return nil, "unavailable" end
+                if not number(itemID) or itemID == 0 then return nil, "unavailable" end
+                if not number(count) then return nil, "unavailable", itemID end
                 container.stacks[#container.stacks + 1] = {
                     slot = slot, itemID = itemID, count = count,
                     link = plain(info.hyperlink) and info.hyperlink or nil,
@@ -184,9 +185,8 @@ local function readContainers(ids, names, bank)
                 result.items[itemID] = (result.items[itemID] or 0) + count
             elseif C_Container.GetContainerItemID then
                 local idOK, itemID = pcall(C_Container.GetContainerItemID, bagID, slot)
-                if not idOK or not plain(itemID) or (itemID ~= nil and itemID ~= 0) then
-                    return nil, "unavailable"
-                end
+                if not idOK or not plain(itemID) then return nil, "unavailable" end
+                if itemID ~= nil and itemID ~= 0 then return nil, "unavailable", itemID end
             end
         end
         result.containers[bagID] = container
@@ -199,7 +199,11 @@ function addon.ScanBags()
     if not character then return false end
     local observed, reason = readContainers(bagIDs())
     bagsObserved = observed ~= nil
-    if observed then character.bags = observed else character.bags.state = reason end
+    if observed then
+        character.bags = observed
+    else
+        character.bags.state, character.bags.stale = reason, true
+    end
     changed()
     return observed ~= nil
 end
@@ -235,14 +239,16 @@ local function characterBankIDs()
     return ids, names
 end
 
+local waitingBankItemID
 function addon.ScanBank()
     if not bankOpen then return false end
     local character = ensureCharacter()
     if not character then return false end
     local ids, names = characterBankIDs()
     local observed, reason
+    waitingBankItemID = nil
     if ids and (#ids > 0 or next(character.bank.containers) == nil) then
-        observed, reason = readContainers(ids, names, true)
+        observed, reason, waitingBankItemID = readContainers(ids, names, true)
     else
         reason = type(names) == "string" and names or "unavailable"
     end
@@ -256,15 +262,17 @@ function addon.ScanBank()
     return observed ~= nil
 end
 
-local bankScanQueued = false
+local queuedBankScan
 local function queueBankScan()
-    if bankScanQueued then return end
+    if queuedBankScan then return end
     if not C_Timer or not C_Timer.After then addon.ScanBank(); return end
-    bankScanQueued = true
-    C_Timer.After(0.1, function()
-        bankScanQueued = false
-        if bankOpen then addon.ScanBank() end
-    end)
+    local function scanIfQueued()
+        if queuedBankScan ~= scanIfQueued then return end
+        queuedBankScan = nil
+        addon.ScanBank()
+    end
+    queuedBankScan = scanIfQueued
+    C_Timer.After(0.1, scanIfQueued)
 end
 
 function addon.GetBagCount(itemID)
@@ -295,7 +303,7 @@ local function source(character, location, itemID)
     if not number(count) then count = nil end
     if isCurrent and location == "bags" then count = addon.GetBagCount(itemID) end
     local live = isCurrent and (location == "bags" and count ~= nil or location == "bank" and bankOpen and stored.state == "scanned")
-    local stale = location == "bank" and stored.stale
+    local stale = stored.stale and not (isCurrent and location == "bags" and live)
     if stale then live = false end
     return {
         guid = character.guid, name = character.name, realm = character.realm,
@@ -406,7 +414,10 @@ events:SetScript("OnEvent", function(_, event, name, success)
     elseif event == "GET_ITEM_INFO_RECEIVED" or event == "ITEM_DATA_LOAD_RESULT" then
         if number(name) then
             materialInfo[name] = nil
-            if success then itemRequests[name] = nil end
+            if success then
+                itemRequests[name] = nil
+                if name == waitingBankItemID then queueBankScan() end
+            end
             changed()
         end
     elseif event == "PLAYER_LOGIN" then
@@ -419,8 +430,14 @@ events:SetScript("OnEvent", function(_, event, name, success)
         queueBankScan()
     elseif event == "BANKFRAME_CLOSED" then
         bankOpen = false
+        queuedBankScan, waitingBankItemID = nil, nil
         addon.ScanBags()
     else
+        -- A bag or bank change can move stock between both snapshots. The old
+        -- bank count is safe to display, but cannot be trusted until the rescan.
+        if bankOpen and current then
+            current.bank.state, current.bank.stale = "pending", true
+        end
         addon.ScanBags()
         if bankOpen then queueBankScan() end
     end

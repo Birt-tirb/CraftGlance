@@ -5,7 +5,7 @@ local filtered, filterChanges, schematicReads = false, 0, 0
 local bags, bank, unknown, bankOpen = 0, 4, false, false
 local bankKnown, altBags, iconAvailable = true, 0, true
 local altBankKnown, altBank = false, 0
-local bankStale, altBankStale = false, false
+local bankStale, altBankStale, altBagsStale = false, false, false
 local inCombat = false
 local positionUpdates = 0
 local lastSearch
@@ -56,6 +56,8 @@ local function widget(kind, name, parent)
         end
         return 700
     end
+    function frame:GetParent() return self.parent end
+    function frame:SetParent(parent) self.parent = parent end
     function frame:GetLeft() return 100 end
     function frame:GetRight() return 1000 end
     function frame:GetEffectiveScale() return 1 end
@@ -86,6 +88,7 @@ local function widget(kind, name, parent)
         self.attributes[key] = value
     end
     function frame:SetScript(event, callback) self.scripts[event] = callback end
+    function frame:GetScript(event) return self.scripts[event] end
     function frame:HookScript(event, callback)
         local previous = self.scripts[event]
         self.scripts[event] = function(...)
@@ -115,7 +118,12 @@ local function widget(kind, name, parent)
     function frame:SetChecked(value) self.checked = value end
     function frame:GetChecked() return self.checked end
     function frame:SetScrollChild(child) self.scrollChild = child end
-    function frame:SetVerticalScroll(value) self.scroll = math.max(0, math.min(value, self:GetVerticalScrollRange())) end
+    function frame:SetVerticalScroll(value)
+        local offset = math.max(0, math.min(value, self:GetVerticalScrollRange()))
+        if offset == self:GetVerticalScroll() then return end
+        self.scroll = offset
+        if self.scripts.OnVerticalScroll then self.scripts.OnVerticalScroll(self, offset) end
+    end
     function frame:GetVerticalScroll() return self.scroll or 0 end
     function frame:GetVerticalScrollRange()
         return self.scrollChild and math.max(0, self.scrollChild:GetHeight() - self:GetHeight()) or 0
@@ -196,6 +204,9 @@ function ScrollFrame_OnScrollRangeChanged(frame, _, verticalRange)
 end
 GameTooltip = {lines = {}, shown = false}
 function GameTooltip:SetOwner(owner) self.owner = owner end
+function GameTooltip:IsOwned(frame) return self.owner == frame end
+function GameTooltip:IsShown() return self.shown end
+function GameTooltip:SetCurrencyByID(id) self.lines = {"Currency " .. id} end
 function GameTooltip:SetText(value) self.lines = {value} end
 function GameTooltip:AddLine(value) self.lines[#self.lines + 1] = value end
 function GameTooltip:SetItemByID(itemID) self.itemID = itemID; self.lines = {"Item " .. itemID} end
@@ -238,7 +249,7 @@ function addon.GetSources(itemID)
         {guid = "Player-A", name = "Ari", realm = "Normal", isCurrent = true, location = "bank",
             count = bankKnown and bank or nil, scanned = bankKnown, stale = bankStale, updatedAt = 880},
         {guid = "Player-B", name = "Bea", realm = "Normal", isCurrent = false, location = "bags",
-            count = altBags, scanned = true, updatedAt = 820},
+            count = altBags, scanned = true, stale = altBagsStale, updatedAt = 820},
         {guid = "Player-B", name = "Bea", realm = "Normal", isCurrent = false, location = "bank",
             count = altBankKnown and altBank or nil, scanned = altBankKnown, stale = altBankStale, updatedAt = 760},
     }
@@ -269,10 +280,13 @@ local function flush()
         table.remove(timers, 1)()
     end
 end
-local function event(name, ...)
+local function dispatch(name, ...)
     for _, frame in ipairs(widgets) do
         if frame.events[name] and frame.scripts.OnEvent then frame.scripts.OnEvent(frame, name, ...) end
     end
+end
+local function event(name, ...)
+    dispatch(name, ...)
     flush()
 end
 local function expect(value, absent)
@@ -296,14 +310,14 @@ end
 local function materialRow(itemID)
     itemID = itemID or 2589
     for _, frame in ipairs(widgets) do
-        if frame:IsVisible() and frame.itemID == itemID and frame.stockRows then return frame end
+        if frame:IsVisible() and frame.itemID == itemID and frame.cardTop then return frame end
     end
     error("No visible material row for " .. itemID)
 end
 local function expectOwner(name, bagCount, bankCount, itemID)
     local row = materialRow(itemID)
-    for _, owner in ipairs(row.stockRows) do
-        if owner:IsVisible() and owner.owner.text == name then
+    for _, owner in ipairs(widgets) do
+        if owner.parent == row and owner.holding and owner:IsVisible() and owner.owner.text == name then
             assert(owner.bags.text == bagCount, name .. " bag stock: " .. tostring(owner.bags.text))
             assert(owner.bank.text == bankCount, name .. " bank stock: " .. tostring(owner.bank.text))
             return owner
@@ -437,7 +451,13 @@ flush()
 expect("Known stock: 13 crafts")
 expectOwner("Bea", "9", "7*")
 expectTooltip(expectOwner("Bea", "9", "7*"), "Bank: 7 (last observed 4m ago; rescan needed)")
-altBankStale, altBags, altBank = false, 0, 0
+altBagsStale = true
+addon.InventoryChanged(); flush()
+local staleBags = expectOwner("Bea", "9*", "7*")
+assert(staleBags.bags.color[1] == 0.76)
+expectTooltip(staleBags, "Bags: 9 (last observed 3m ago; rescan needed)")
+expect("Known stock: 4 crafts")
+altBagsStale, altBankStale, altBags, altBank = false, false, 0, 0
 addon.InventoryChanged()
 flush()
 expectOwner("Bea", "0", "0")
@@ -480,10 +500,10 @@ assert(tableHeader.parent == CraftGlancePanel and tableHeader:IsVisible(), "The 
 materialRow():Wheel(-1)
 local wheelPosition = CraftGlanceScroll:GetVerticalScroll()
 assert(wheelPosition > 0, "Wheeling over a reagent moves an overflowing list down")
-expectOwner("You", "2", "Not scanned"):Wheel(1)
+expectOwner("Bea", "9", "Not scanned"):Wheel(1)
 assert(CraftGlanceScroll:GetVerticalScroll() < wheelPosition, "Wheeling over a character moves the same list up")
 CraftGlanceScroll:SetVerticalScroll(overflow - 1)
-materialRow():Wheel(-1)
+materialRow(2592):Wheel(-1)
 assert(CraftGlanceScroll:GetVerticalScroll() == overflow, "Wheel scrolling stops at the actual list bottom")
 CraftGlanceScroll:SetVerticalScroll(0)
 materialRow():Wheel(1)
@@ -705,24 +725,128 @@ addon.BuildRecipePlan = buildPlan
 page:Show(); flush()
 print = originalPrint
 expect("Craft now: 1")
-local currencyInfo = C_CurrencyInfo
-C_CurrencyInfo = {GetCurrencyInfo = function() return {name = "Token", quantity = 100} end}
+local currencyInfo, balance, mixed = C_CurrencyInfo, 100, false
+C_CurrencyInfo = {GetCurrencyInfo = function() return {name = "Token", quantity = balance, iconFileID = 2468} end}
 C_TradeSkillUI.GetRecipeSchematic = function(id)
     if id == 10000 then
-        return {reagentSlotSchematics = {{required = true, quantityRequired = 3, reagents = {{currencyID = 10}}}}}
+        schematicReads = schematicReads + 1
+        local slots = {{required = true, quantityRequired = 3, reagents = {{currencyID = 10}}}}
+        if mixed then slots[2] = {required = true, quantityRequired = 1, reagents = {{itemID = 2589}}} end
+        return {reagentSlotSchematics = slots}
     end
     return getSchematic(id)
 end
 form:Init({recipeID = 10000, name = "Currency recipe", learned = true})
 flush()
-expect("Craft now: 33")
-expect("Known stock: 33 crafts")
+expect("Craft now: 33"); expect("Known stock: 33 crafts")
 expect("Bags and owned currency", "From your bags only")
+expect("Owned: 100")
+local tokenRow
+for _, widget in ipairs(widgets) do
+    if widget.currencyID == 10 and widget:IsVisible() then tokenRow = widget end
+end
+assert(tokenRow and tokenRow.icon.texture == 2468 and tokenRow.requirement.text == "3")
+
+balance = 1
+local readsBeforeCurrency = schematicReads
+dispatch("CURRENCY_DISPLAY_UPDATE", 10, 2)
+dispatch("CURRENCY_DISPLAY_UPDATE", 10, 1)
+assert(#timers == 1, "Currency changes share a debounced refresh")
+flush()
+expect("Craft now: 0"); expect("Known stock: 0 crafts")
+expect("Owned: 1"); expect("Missing: 2")
+balance = 0
+event("CURRENCY_DISPLAY_UPDATE", 10, 0)
+expect("Owned: 0"); expect("Missing: 3")
+expect("Craft now: 0"); expect("Known stock: 0 crafts")
+balance = nil
+event("CURRENCY_DISPLAY_UPDATE", 10)
+expect("Owned: unknown", "Owned: 0"); expect("Check reagent choices", "Known stock:")
+assert(schematicReads == readsBeforeCurrency + 3)
+mixed, balance = true, 6
+event("CURRENCY_DISPLAY_UPDATE", 10, 6)
+expect("Owned: 6"); expect("Craft now: 2")
+expectOwner("You", "2", "2")
+
 C_CurrencyInfo, C_TradeSkillUI.GetRecipeSchematic = currencyInfo, getSchematic
 form:Init({recipeID = 3276, name = "Heavy Linen Bandage", learned = true})
 flush()
-expect("Craft now: 1")
-expect("From your bags only")
+expect("Craft now: 1"); expect("From your bags only", "Owned:")
 assert(create.scripts.OnClick == createHandler and createAll.scripts.OnClick == createHandler,
     "Native Create and Create All keep their handlers")
+
+-- Exercise native scrollbar changes as well as the wheel. A search with sparse
+-- holdings must expose every scanned zero while allocating just a viewport of widgets.
+local catalogue = {}
+for materialIndex = 1, 100 do
+    local sources = {}
+    for ownerIndex = 1, 12 do
+        local name = "Alt" .. ownerIndex
+        local owned = ownerIndex == (materialIndex - 1) % 12 + 1 and materialIndex or 0
+        for _, location in ipairs({"bags", "bank"}) do
+            sources[#sources + 1] = {guid = name, name = name, location = location,
+                count = location == "bags" and owned or 0, scanned = true}
+        end
+    end
+    catalogue[materialIndex] = {name = "Reagent " .. materialIndex, itemID = 10000 + materialIndex, sources = sources}
+end
+addon.GetMaterialList = function(query)
+    if query == "none" then return {} end
+    if query == "last" then return {catalogue[100]} end
+    return catalogue
+end
+control("All Materials"):Click()
+local visited, visitedCount = {}, 0
+local function inspectViewport()
+    local ownersAllocated, cardsAllocated = 0, 0
+    local height = CraftGlanceScroll:GetHeight()
+    for _, widget in ipairs(widgets) do
+        if widget.cardTop then cardsAllocated = cardsAllocated + 1 end
+        if widget.holding then
+            ownersAllocated = ownersAllocated + 1
+            if widget:IsVisible() then
+                local item = widget.parent.itemID - 10000
+                local owner = tonumber(widget.owner.text:match("^Alt(%d+)$"))
+                local expected = owner == (item - 1) % 12 + 1 and item or 0
+                assert(widget.bags.text == tostring(expected) and widget.bank.text == "0",
+                    "Recycled owner widgets display the current item's holdings")
+                local key = item .. ":" .. owner
+                if not visited[key] then visited[key] = true; visitedCount = visitedCount + 1 end
+            end
+        end
+    end
+    assert(ownersAllocated <= math.ceil(height / 24) + 2, "Owner allocation is bounded by the viewport")
+    assert(cardsAllocated <= 4, "A sparse catalogue recycles material cards")
+end
+local limit = CraftGlanceScroll:GetVerticalScrollRange()
+local hoveredOwner = expectOwner("Alt1", "1", "0", 10001)
+hoveredOwner.scripts.OnEnter(hoveredOwner)
+CraftGlanceScroll:SetVerticalScroll(24)
+assert(not GameTooltip.shown or GameTooltip.lines[1] == hoveredOwner.holding.fullName,
+    "Scrolling rebinds or clears a stationary owner tooltip")
+hoveredOwner.scripts.OnLeave(hoveredOwner)
+local hoveredMaterial = materialRow(10001)
+hoveredMaterial.scripts.OnEnter(hoveredMaterial)
+CraftGlanceScroll:SetVerticalScroll(limit)
+assert(not GameTooltip.shown or GameTooltip.itemID == hoveredMaterial.itemID,
+    "A recycled material card cannot keep the previous item's tooltip")
+hoveredMaterial.scripts.OnLeave(hoveredMaterial)
+for offset = 0, limit, math.floor(CraftGlanceScroll:GetHeight() - 24) do
+    CraftGlanceScroll:SetVerticalScroll(offset)
+    inspectViewport()
+end
+CraftGlanceScroll:SetVerticalScroll(limit)
+inspectViewport()
+assert(visitedCount == 1200, "All 100 materials and all twelve scanned owners are reachable")
+expectTooltip(expectOwner("Alt12", "0", "0", 10100), "Alt12", "Bank: 0")
+search:SetText("none"); flush()
+expect("No recorded material matches.", "Reagent 100")
+assert(CraftGlanceScroll:GetVerticalScroll() == 0 and not tableHeader:IsVisible())
+search:SetText("last"); flush()
+expect("Reagent 100", "No recorded material")
+expectOwner("Alt4", "100", "0", 10100)
+control("This Recipe"):Click()
+expect("Heavy Linen Bandage", "Reagent 100")
+expectOwner("You", "2", "2")
+addon.GetMaterialList = getMaterials
 print("CraftGlance panel selection, inventory, search and native controls passed")
