@@ -1,5 +1,6 @@
 local addon, frames = {}, {}
 local player = {guid = "Player-A", name = "Ari", realm = "Normal", faction = "Alliance", realmID = 1}
+local normalizedRealm
 local clock, bankVisible, flags = 1000, false, nil
 local containers = {[0] = {{itemID = 2589, stackCount = 7}}, [5] = {{itemID = 2592, stackCount = 3}},
     [6] = {{itemID = 2589, stackCount = 2}}, [15] = {{itemID = 2589, stackCount = 100}}}
@@ -11,6 +12,7 @@ function GetServerTime() return clock end
 function GetCurrentRegion() return 3 end
 function GetRealmID() return player.realmID end
 function GetRealmName() return player.realm end
+function GetNormalizedRealmName() return normalizedRealm end
 function UnitName() return player.name end
 function UnitGUID() return player.guid end
 function UnitFactionGroup() return player.faction end
@@ -350,6 +352,68 @@ assert(addon.GetScanSummary().characterCount == 3,
 plan = addon.BuildRecipePlan({item(2589, 1)})
 assert(plan.ingredients[1].knownTotal == 22 and plan.craftWithKnownStock == 22 and not plan.stockUnknown,
     "Only the migrated same-scope characters contribute stock")
+
+-- Forever can return zero/empty realm APIs for every recorded character.
+CraftGlanceDB = {inventoryVersion = 1, characters = {}}
+local foreverMain, foreverStock, foreverEmpty = "Player-6948-00000001", "Player-6948-00000002", "Player-6948-00000003"
+local function foreverCharacter(guid, name, bagCount, bankCount)
+    CraftGlanceDB.characters[guid] = {
+        guid = guid, name = name, realm = "", realmID = 0, region = 3, ruleset = "3:0", faction = "Alliance",
+        bags = {scanned = true, updatedAt = 900, items = {[2589] = bagCount}},
+        bank = {scanned = bankCount ~= nil, updatedAt = bankCount ~= nil and 800 or nil,
+            items = bankCount ~= nil and {[2589] = bankCount} or {}},
+    }
+end
+foreverCharacter(foreverMain, "ForeverMain", 4, 0)
+foreverCharacter(foreverStock, "ForeverStock", 9, nil)
+foreverCharacter(foreverEmpty, "ForeverEmpty", 0, 0)
+player.guid, player.name, player.realm, player.realmID = foreverMain, "ForeverMain", "", 0
+normalizedRealm = ""
+containers[0][1].stackCount = 4
+loadModules()
+local foreverScope = "realm-guid-v1:3:6948"
+local function expectForeverRoster()
+    assert(addon.GetScanSummary().characterCount == 3, "Blank Forever realm metadata preserves all three same-realm characters")
+    for _, guid in ipairs({foreverMain, foreverStock, foreverEmpty}) do
+        assert(CraftGlanceDB.characters[guid].ruleset == foreverScope, "Real player GUIDs supply stable realm identity")
+    end
+    local emptyBag, emptyBank = findSource(foreverEmpty, "bags"), findSource(foreverEmpty, "bank")
+    assert(emptyBag.scanned and emptyBag.count == 0 and emptyBank.scanned and emptyBank.count == 0,
+        "A migrated Forever zero-stock alt retains its explicit 0 / 0 rows")
+    local retained = addon.BuildRecipePlan({item(2589, 1)})
+    assert(retained.craftNow == 4 and retained.ingredients[1].knownTotal == 13
+        and retained.craftWithKnownStock == 13 and retained.stockUnknown,
+        "Realm migration retains four live bags plus nine recorded alt items without trusting its unscanned bank")
+    assert(findSource(foreverStock, "bags").updatedAt == 900
+        and findSource(foreverMain, "bank").updatedAt == 800, "Scope migration preserves saved inventory ages")
+end
+expectForeverRoster()
+foreverCharacter("Player-6949-00000004", "OtherGuidRealm", 100, 100)
+foreverCharacter("Player-6948-00000005", "OtherGuidRegion", 100, 100)
+CraftGlanceDB.characters["Player-6948-00000005"].region = 4
+CraftGlanceDB.characters["Player-6948-00000005"].ruleset = "4:0"
+foreverCharacter("Player-6948-00000006", "OtherGuidFaction", 100, 100)
+CraftGlanceDB.characters["Player-6948-00000006"].faction = "Horde"
+CraftGlanceDB.characters[foreverMain].ruleset = "unverified:" .. foreverMain
+loadModules()
+expectForeverRoster()
+assert(CraftGlanceDB.characters["Player-6949-00000004"].ruleset == "realm-guid-v1:3:6949",
+    "The same legacy 3:0 key cannot merge a different GUID realm component")
+player.realmID, player.realm, normalizedRealm = nil, nil, nil
+loadModules()
+expectForeverRoster()
+player.realmID, player.realm, normalizedRealm = 777, "Forever Realm", "ForeverRealm"
+loadModules()
+expectForeverRoster()
+player.realmID, player.realm, normalizedRealm = 0, "", ""
+loadModules()
+expectForeverRoster()
+local foreverRecords = 0
+for _ in pairs(CraftGlanceDB.characters) do foreverRecords = foreverRecords + 1 end
+assert(foreverRecords == 6, "Realm API changes do not duplicate any saved GUID")
+
 CraftGlanceDB = originalDB
 for key, value in pairs(identityPlayer) do player[key] = value end
+normalizedRealm = nil
+containers[0][1].stackCount = 7
 print("CraftGlance inventory persistence and recipe planning passed")

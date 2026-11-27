@@ -50,56 +50,95 @@ local function realmName(value)
     if normalized ~= "" then return normalized end
 end
 
-local function scopeKey(region, realm)
+local function guidRealm(guid)
+    if not plain(guid) or type(guid) ~= "string" then return nil end
+    local realm = guid:match("^Player%-(%d+)%-%x+$")
+    return identityNumber(tonumber(realm))
+end
+
+local function scopeKey(region, realm, guid)
+    if not identityNumber(region) then return nil end
+    local component = guidRealm(guid)
+    if component then return "realm-guid-v1:" .. region .. ":" .. component end
     local normalized = realmName(realm)
-    if identityNumber(region) and normalized then return "realm-v2:" .. region .. ":" .. normalized end
+    if normalized then return "realm-v2:" .. region .. ":" .. normalized end
 end
 
 local function migrateScope(character)
     local key, normalized = character.ruleset, realmName(character.realm)
-    if type(key) ~= "string" or not normalized then return end
-    local region, identity = key:match("^realm%-v2:(%d+):(.+)$")
-    local canonical = region ~= nil
-    if not region then region, identity = key:match("^(%d+):(.+)$") end
+    if type(key) ~= "string" then return end
+    local component = guidRealm(character.guid)
+    local region, identity = key:match("^realm%-guid%-v1:(%d+):(%d+)$")
+    local kind = region and "guid"
+    if not region then
+        region, identity = key:match("^realm%-v2:(%d+):(.+)$")
+        kind = region and "name"
+    end
+    if not region then
+        region, identity = key:match("^(%d+):(.+)$")
+        kind = region and "legacy"
+    end
+    if not region and component and key == "unverified:" .. character.guid then
+        region, kind = character.region, "unverified"
+    end
     region = identityNumber(tonumber(region))
     if not region or (character.region ~= nil and character.region ~= region) then return end
     local storedID = identityNumber(character.realmID)
-    if character.realmID ~= nil and not storedID then return end
-    local legacyID = not canonical and identityNumber(tonumber(identity)) or nil
-    if canonical then
-        if identity ~= normalized then return end
-    elseif legacyID then
-        if tostring(legacyID) ~= identity or (storedID and storedID ~= legacyID) then return end
-    elseif realmName(identity) ~= normalized then
-        return
+    if character.realmID ~= nil and character.realmID ~= 0 and not storedID then return end
+    local legacyID
+    if kind == "guid" then
+        if not component or identity ~= tostring(component) then return end
+    elseif kind == "name" then
+        if not normalized or identity ~= normalized then return end
+    elseif kind == "legacy" then
+        legacyID = identityNumber(tonumber(identity))
+        if legacyID then
+            if tostring(legacyID) ~= identity or (storedID and storedID ~= legacyID) then return end
+        elseif identity == "0" and component then
+            -- Forever can report no realm name and a zero realm ID. Only the
+            -- individual Player GUID can disambiguate those old shared keys.
+            if storedID then return end
+        elseif not normalized or realmName(identity) ~= normalized then
+            return
+        end
     end
+    local stable = scopeKey(region, character.realm, character.guid)
+    if not stable then return end
     character.region = region
     character.realmID = storedID or legacyID
-    character.ruleset = scopeKey(region, character.realm)
+    character.ruleset = stable
 end
 
 local function ensureCharacter()
     local guid = call(UnitGUID, "player")
     local name, realm = call(UnitName, "player"), call(GetRealmName)
-    if type(guid) ~= "string" or type(name) ~= "string" or type(realm) ~= "string" then return nil end
+    if type(guid) ~= "string" or type(name) ~= "string" then return nil end
+    if type(realm) ~= "string" then
+        if not guidRealm(guid) then return nil end
+        realm = ""
+    end
     local characters = roster()
     for _, recorded in pairs(characters) do
         if type(recorded) == "table" then migrateScope(recorded) end
     end
     local character = characters[guid]
     if type(character) ~= "table" then character = {} end
-    local sameRealm = realmName(character.realm) == realmName(realm)
+    local sameGUIDRealm = character.guid == guid and guidRealm(guid) ~= nil
+    local sameRealm = sameGUIDRealm or realmName(character.realm) == realmName(realm)
     local region = identityNumber(call(GetCurrentRegion))
     local realmID = identityNumber(call(GetRealmID))
     -- A missing API result must not erase identity learned for this same GUID.
     if not region and sameRealm then region = identityNumber(character.region) end
     if not realmID and sameRealm and character.region == region then realmID = identityNumber(character.realmID) end
+    if not realmName(realm) and sameRealm and character.region == region and realmName(character.realm) then
+        realm = character.realm
+    end
     character.guid, character.name, character.realm = guid, name, realm
     character.faction = call(UnitFactionGroup, "player") or "Unknown"
     character.realmID, character.region = realmID, region
-    -- Realm names are stable when GetRealmID is temporarily unavailable. Unknown
-    -- regions get a GUID-local scope rather than pooling unverified characters.
-    character.ruleset = scopeKey(region, realm) or ("unverified:" .. guid)
+    -- Prefer the stable realm component of a real Player GUID even if APIs later
+    -- supply names or IDs. Unknown regions remain isolated to this character.
+    character.ruleset = scopeKey(region, realm, guid) or ("unverified:" .. guid)
     character.bags, character.bank = snapshot(character.bags), snapshot(character.bank)
     character.lastSeen = now()
     characters[guid], current = character, character
@@ -240,10 +279,13 @@ end
 local function compatible(character)
     if not current then return false end
     migrateScope(character)
+    if character.faction ~= current.faction or character.ruleset ~= current.ruleset or
+        character.region ~= current.region then return false end
+    local component, currentComponent = guidRealm(character.guid), guidRealm(current.guid)
+    if component or currentComponent then return component ~= nil and component == currentComponent end
     local realmID, currentID = identityNumber(character.realmID), identityNumber(current.realmID)
-    return character.faction == current.faction and character.ruleset == current.ruleset and
-        realmName(character.realm) == realmName(current.realm) and
-        character.region == current.region and not (realmID and currentID and realmID ~= currentID)
+    return realmName(character.realm) == realmName(current.realm) and
+        not (realmID and currentID and realmID ~= currentID)
 end
 
 local function source(character, location, itemID)

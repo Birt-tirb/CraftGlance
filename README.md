@@ -5,14 +5,19 @@ in your own profession window to see how many crafts your bags support and
 where your materials are stored across recorded characters and banks.
 
 Version 0.5.1 is a review candidate on branch `craftglance-0.5.1`. Its manual
-in-game verification is tracked in [TESTING.md](TESTING.md).
+in-game verification, including the user-authorized local installation, is
+tracked in [TESTING.md](TESTING.md). The main branch and published 0.5.0 ZIP
+remain the release baseline.
+The corrected candidate passed same-session reload and both character-switch
+directions, saved alt-bank checks, deposit/withdrawal counts and compact Cooking
+layout checks. All four test cloth were restored to the main character's bags.
 
 ## Features
 
 - A collapsible panel, 400 UI units wide, with brown and gold styling matched to
-  the profession window, native WoW frame chrome and tabs. It reserves native
-  layout space so the bank opens alongside it. The recipe list, Create and
-  Create All controls stay usable.
+  the profession window, native WoW frame chrome and softer brown tabs with a
+  reduced hover glow. It reserves native layout space so the bank opens
+  alongside it. The recipe list, Create and Create All controls stay usable.
 - **This Recipe** opens by default. Native recipe and reagent icons help you
   recognize the selected craft and its ingredients.
 - The prominent **Craft now** count uses items in bags only, including the
@@ -81,8 +86,10 @@ Forever exposes no verified ruleset identifier in this client, so the addon
 conservatively limits stock comparisons to the current realm and faction. Guild
 and shared account banks are not scanned. Characters that have never logged in
 with CraftGlance cannot be listed; the footer prompts you to scan alts.
-Inventory scope uses a stable realm key and migrates legacy keys so temporary
-realm-ID availability changes can preserve a character's saved observations.
+Inventory scope uses the realm component of a valid Player GUID with region
+and faction boundaries. Legacy keys migrate to this stable identity, including
+the blank realm names and zero realm IDs observed in the Forever client.
+Temporary realm-API changes preserve recorded character stock and ages.
 
 Required slots with ambiguous alternative reagents, or currency requirements
 whose quantities are missing or invalid, show a request to review the recipe.
@@ -107,10 +114,13 @@ reagent choices. Panel fixtures exercise refresh fallback and recovery alongside
 the compact layout. Live-client verification is tracked separately.
 The archive is written to `dist/CraftGlance-0.5.1.zip`.
 
-Both Lua suites passed for this review using Lupa's explicit Lua 5.1 runtime.
-The review environment had no standalone `lua5.1` executable. Packaging passed:
-the candidate ZIP contains the addon, documentation and MIT license in one
-`CraftGlance/` folder, with no saved player inventory.
+Both Lua suites passed for this review using Lupa's explicit Lua 5.1 runtime,
+including the observed blank-realm migration regression. The review environment
+had no standalone `lua5.1` executable. The latest candidate package passed
+integrity, structure, version, source-equality and MIT license checks. The softer tab palette is
+installed and awaits visual confirmation after a UI reload. Additional
+purchased bank tabs and later-day identity persistence remain manual coverage
+gaps.
 
 See [TESTING.md](TESTING.md) for the release's actual in-game checks and any
 checks still awaiting player interaction.

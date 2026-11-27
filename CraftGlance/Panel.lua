@@ -467,6 +467,21 @@ local function attach()
         local control = CreateFrame("Button", nil, panel, "PanelTopTabButtonTemplate")
         control:SetPoint("TOPLEFT", x, -34); control:SetText(caption)
         PanelTemplates_TabResize(control, 0, 180); control:SetScript("OnClick", callback)
+        -- Keep native tab geometry, with the profession frame's quieter brown palette.
+        for _, key in ipairs({"LeftActive", "MiddleActive", "RightActive"}) do
+            local piece = control[key]
+            if piece then
+                piece:SetDesaturated(true); piece:SetVertexColor(0.60, 0.43, 0.24); piece:SetAlpha(0.75)
+            end
+        end
+        for _, key in ipairs({"Left", "Middle", "Right"}) do
+            local piece = control[key]
+            if piece then piece:SetVertexColor(0.90, 0.78, 0.60); piece:SetAlpha(0.75) end
+        end
+        for _, key in ipairs({"LeftHighlight", "MiddleHighlight", "RightHighlight"}) do
+            local piece = control[key]
+            if piece then piece:SetAlpha(0.12) end
+        end
         return control
     end
     recipeTab = tab("This Recipe", 14, function() view = "recipe"; scroll:SetVerticalScroll(0); refresh() end)
